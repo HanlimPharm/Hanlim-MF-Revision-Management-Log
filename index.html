@@ -60,6 +60,8 @@
   const ALARMS_KEY = "revledger:alarms:v5";
   const CUSTOM_TABS_KEY = "revledger:customTabs:v5";
   const TRASH_KEY = "revledger:trash:v5";
+  const NOTICES_KEY = "revledger:notices:v5";
+  const MIGRATION_KEY = "revledger:migration:perdoc:v1";
   const TRASH_RETENTION_DAYS = 7;
   const SESSION_KEY = "revledger:session:v5";
   const DEFAULT_LABELS = {
@@ -112,6 +114,146 @@
     } catch (e) {
       return fallback;
     }
+  }
+  const DOC_INDEX_FIELD = { alarm: "toEmpId", trash: "deletedBy" };
+  const docKeyOf = (kind, id) => `${kind}__${id}`;
+  const kvPrefixOf = (kind) => `revledger:doc:${kind}:`;
+  const idFieldOf = (kind) => kind === "trash" ? "trashId" : "id";
+  async function putKind(kind, id, obj) {
+    var _a;
+    try {
+      if (hasArtifactStorage()) {
+        await window.storage.set(`${kvPrefixOf(kind)}${id}`, JSON.stringify(obj), true);
+      } else {
+        const doc = { kind, value: JSON.stringify(obj) };
+        const idx = DOC_INDEX_FIELD[kind];
+        if (idx) doc[idx] = (_a = obj[idx]) != null ? _a : "";
+        await firebase.firestore().collection("revledger").doc(docKeyOf(kind, id)).set(doc);
+      }
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+  async function deleteKind(kind, id) {
+    try {
+      if (hasArtifactStorage()) await window.storage.delete(`${kvPrefixOf(kind)}${id}`, true);
+      else await firebase.firestore().collection("revledger").doc(docKeyOf(kind, id)).delete();
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+  async function listKind(kind, filter) {
+    try {
+      let items = [];
+      if (hasArtifactStorage()) {
+        const res = await window.storage.list(kvPrefixOf(kind), true);
+        for (const key of (res == null ? void 0 : res.keys) || []) {
+          try {
+            const r = await window.storage.get(key, true);
+            if (r) items.push(JSON.parse(r.value));
+          } catch (e) {
+          }
+        }
+      } else {
+        let q = firebase.firestore().collection("revledger").where("kind", "==", kind);
+        if (filter) q = q.where(filter.field, "==", filter.value);
+        const snap = await q.get();
+        items = snap.docs.map((d) => JSON.parse(d.data().value));
+      }
+      if (filter) items = items.filter((x) => x[filter.field] === filter.value);
+      return items;
+    } catch (e) {
+      return null;
+    }
+  }
+  async function runLimited(fns, limit = 15) {
+    const results = new Array(fns.length);
+    let next = 0;
+    const workers = Array.from({ length: Math.min(limit, fns.length) }, async () => {
+      while (next < fns.length) {
+        const i = next++;
+        results[i] = await fns[i]();
+      }
+    });
+    await Promise.all(workers);
+    return results;
+  }
+  function sortChangesDesc(list) {
+    return list.slice().sort((a, b) => {
+      var _a, _b;
+      const ta = (_a = a.createdTs) != null ? _a : 0, tb = (_b = b.createdTs) != null ? _b : 0;
+      if (ta !== tb) return tb - ta;
+      if ((a.createdAt || "") !== (b.createdAt || "")) return (a.createdAt || "") < (b.createdAt || "") ? 1 : -1;
+      return a.id < b.id ? 1 : -1;
+    });
+  }
+  async function migrateToPerDocument() {
+    const flag = await loadShared(MIGRATION_KEY, null);
+    if (flag) return;
+    const legacyChanges = await loadShared(CHANGES_KEY, null);
+    if (legacyChanges === null) return;
+    const legacyAlarms = await loadShared(ALARMS_KEY, null) || [];
+    const legacyTrash = await loadShared(TRASH_KEY, null) || [];
+    const base = Date.now();
+    const jobs = [];
+    legacyChanges.forEach((c, i) => {
+      var _a;
+      const withTs = { ...c, createdTs: (_a = c.createdTs) != null ? _a : base - i };
+      jobs.push(() => putKind("change", c.id, withTs));
+    });
+    legacyAlarms.forEach((a) => jobs.push(() => putKind("alarm", a.id, a)));
+    legacyTrash.forEach((t) => jobs.push(() => putKind("trash", t.trashId, t)));
+    const results = await runLimited(jobs);
+    if (!results.every(Boolean)) return;
+    await saveShared(MIGRATION_KEY, { at: (/* @__PURE__ */ new Date()).toISOString(), changes: legacyChanges.length, alarms: legacyAlarms.length, trash: legacyTrash.length });
+  }
+  const CHANGE_IMPORT_ALIASES = {
+    docNumber: ["\uBCC0\uACBD\uBB38\uC11C\uBC88\uD638", "\uBB38\uC11C\uBC88\uD638", "\uBCC0\uACBD\uBC88\uD638"],
+    changeName: ["\uBCC0\uACBD\uBA85", "\uBCC0\uACBD\uC81C\uBAA9"],
+    historyText: ["\uBCC0\uACBD\uB0B4\uC6A9", "\uBCC0\uACBD\uC0C1\uC138\uB0B4\uC6A9", "\uC81C\uAC1C\uC815\uC774\uB825\uAE30\uC7AC\uB0B4\uC6A9", "\uB0B4\uC6A9"],
+    noteText: ["\uD2B9\uC774\uC0AC\uD56D", "\uD2B9\uC774\uC0AC\uD56D\uAE30\uC7AC\uB780", "\uBE44\uACE0"],
+    dueDate: ["\uC644\uB8CC\uC608\uC815\uC77C", "\uC644\uB8CC\uC608\uC815", "\uC608\uC815\uC77C"],
+    products: ["\uAD00\uB828\uC81C\uD488", "\uAD00\uB828\uC81C\uD488\uBA85", "\uC81C\uD488", "\uC81C\uD488\uBA85"]
+  };
+  function normHeader(s) {
+    return String(s != null ? s : "").replace(/\s+/g, "").toLowerCase();
+  }
+  function parseImportDate(v) {
+    if (v === null || v === void 0 || String(v).trim() === "") return { ok: true, value: "" };
+    let y, m, d;
+    if (typeof v === "number") {
+      if (v >= 19000101 && v <= 21001231) {
+        const s = String(Math.floor(v));
+        y = +s.slice(0, 4);
+        m = +s.slice(4, 6);
+        d = +s.slice(6, 8);
+      } else if (v > 2e4 && v < 8e4) {
+        const parsed = XLSX.SSF.parse_date_code(v);
+        if (!parsed) return { ok: false };
+        y = parsed.y;
+        m = parsed.m;
+        d = parsed.d;
+      } else {
+        return { ok: false };
+      }
+    } else {
+      const s = String(v).trim();
+      const mt = s.match(/^(\d{4})\D+(\d{1,2})\D+(\d{1,2})\D*$/);
+      if (mt) {
+        y = +mt[1];
+        m = +mt[2];
+        d = +mt[3];
+      } else if (/^\d{8}$/.test(s)) {
+        y = +s.slice(0, 4);
+        m = +s.slice(4, 6);
+        d = +s.slice(6, 8);
+      } else return { ok: false };
+    }
+    const dt = new Date(y, m - 1, d);
+    if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) return { ok: false };
+    return { ok: true, value: `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}` };
   }
   function uid() {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -171,6 +313,12 @@
     const [alarms, setAlarms] = useState([]);
     const [customTabs, setCustomTabs] = useState([]);
     const [trash, setTrash] = useState([]);
+    const [notices, setNotices] = useState([]);
+    const [archived, setArchived] = useState(null);
+    const savedSnapRef = useRef({ change: /* @__PURE__ */ new Map(), alarm: /* @__PURE__ */ new Map(), trash: /* @__PURE__ */ new Map() });
+    const [importResult, setImportResult] = useState(null);
+    const [importingChanges, setImportingChanges] = useState(false);
+    const changeImportRef = useRef(null);
     const [products, setProducts] = useState([]);
     const [requests, setRequests] = useState([]);
     const [changes, setChanges] = useState([]);
@@ -218,37 +366,36 @@
     }, [selection, docSearch, searchScope]);
     useEffect(() => {
       (async () => {
-        const [u, s, p, r, c, lbl, cats, tms, favs, alrs, ctabs, subs, trs] = await Promise.all([
+        const [u, s, p, r, lbl, cats, tms, favs, ctabs, subs, nts] = await Promise.all([
           loadShared(USERS_KEY, []),
           loadShared(SIGNUPS_KEY, []),
           loadShared(PRODUCTS_KEY, []),
           loadShared(REQUESTS_KEY, []),
-          loadShared(CHANGES_KEY, []),
           loadShared(LABELS_KEY, DEFAULT_LABELS),
           loadShared(CATEGORIES_KEY, DEFAULT_CATEGORIES),
           loadShared(TEAMS_KEY, DEFAULT_TEAMS),
           loadShared(FAVORITES_KEY, {}),
-          loadShared(ALARMS_KEY, []),
           loadShared(CUSTOM_TABS_KEY, []),
           loadShared(SUBCATEGORIES_KEY, []),
-          loadShared(TRASH_KEY, [])
+          loadShared(NOTICES_KEY, [])
         ]);
         setUsers(u);
         setSignups(s);
         setProducts(p);
         setRequests(r);
-        setChanges(c);
         setTabLabels({ ...DEFAULT_LABELS, ...lbl });
         setCategories(cats);
         setTeams(tms);
         setFavorites(favs);
-        setAlarms(alrs);
         setCustomTabs(ctabs);
         setSubcategories(subs);
-        const cutoff = Date.now() - TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1e3;
-        const validTrash = trs.filter((t) => new Date(t.deletedAt).getTime() >= cutoff);
-        setTrash(validTrash);
-        if (validTrash.length !== trs.length) saveShared(TRASH_KEY, validTrash);
+        setNotices(nts);
+        await migrateToPerDocument();
+        const chg = await listKind("change");
+        if (chg === null) setTimeout(() => flash("\uBCC0\uACBD \uC774\uB825\uC744 \uBD88\uB7EC\uC624\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. \uC0C8\uB85C\uACE0\uCE68\uD574 \uC8FC\uC138\uC694."), 400);
+        const chgList = sortChangesDesc(chg || []);
+        savedSnapRef.current.change = new Map(chgList.map((c) => [c.id, JSON.stringify(c)]));
+        setChanges(chgList);
         const session = await loadPersonal(SESSION_KEY, null);
         if (session == null ? void 0 : session.empId) {
           const found = u.find((x) => x.empId === session.empId);
@@ -262,9 +409,62 @@
         setBootLoading(false);
       })();
     }, []);
+    useEffect(() => {
+      if (!(me == null ? void 0 : me.empId)) return;
+      let cancelled = false;
+      (async () => {
+        const [myAlarmList, myTrashList] = await Promise.all([
+          listKind("alarm", { field: "toEmpId", value: me.empId }),
+          listKind("trash", { field: "deletedBy", value: me.empId })
+        ]);
+        if (cancelled) return;
+        const al = myAlarmList || [];
+        savedSnapRef.current.alarm = new Map(al.map((a) => [a.id, JSON.stringify(a)]));
+        setAlarms(al);
+        const cutoff = Date.now() - TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1e3;
+        const tr = myTrashList || [];
+        const valid = tr.filter((t) => new Date(t.deletedAt).getTime() >= cutoff);
+        tr.filter((t) => !valid.includes(t)).forEach((t) => deleteKind("trash", t.trashId));
+        const sortedTrash = valid.slice().sort((a, b) => a.deletedAt < b.deletedAt ? 1 : -1);
+        savedSnapRef.current.trash = new Map(sortedTrash.map((t) => [t.trashId, JSON.stringify(t)]));
+        setTrash(sortedTrash);
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }, [me == null ? void 0 : me.empId]);
+    useEffect(() => {
+      if (selection.type !== "archive" || archived !== null) return;
+      (async () => {
+        const list = await listKind("archived");
+        if (list === null) {
+          flash("\uBCF4\uAD00\uD568\uC744 \uBD88\uB7EC\uC624\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.");
+          setArchived([]);
+          return;
+        }
+        setArchived(sortChangesDesc(list));
+      })();
+    }, [selection.type, archived]);
     const flash = (msg) => {
       setToast(msg);
       setTimeout(() => setToast(null), 2400);
+    };
+    const syncKind = async (kind, arr) => {
+      const saved = savedSnapRef.current[kind];
+      const idField = idFieldOf(kind);
+      const nextMap = new Map(arr.map((x) => [x[idField], JSON.stringify(x)]));
+      const jobs = [];
+      nextMap.forEach((str, id) => {
+        if (saved.get(id) !== str) jobs.push(() => putKind(kind, id, JSON.parse(str)));
+      });
+      saved.forEach((_, id) => {
+        if (!nextMap.has(id)) jobs.push(() => deleteKind(kind, id));
+      });
+      if (jobs.length === 0) return true;
+      const results = await runLimited(jobs);
+      const ok = results.every(Boolean);
+      if (ok) savedSnapRef.current[kind] = nextMap;
+      return ok;
     };
     const persist = useCallback(async (next) => {
       setSaving(true);
@@ -273,14 +473,15 @@
       if (next.signups) jobs.push(saveShared(SIGNUPS_KEY, next.signups));
       if (next.products) jobs.push(saveShared(PRODUCTS_KEY, next.products));
       if (next.requests) jobs.push(saveShared(REQUESTS_KEY, next.requests));
-      if (next.changes) jobs.push(saveShared(CHANGES_KEY, next.changes));
+      if (next.changes) jobs.push(syncKind("change", next.changes));
       if (next.tabLabels) jobs.push(saveShared(LABELS_KEY, next.tabLabels));
       if (next.categories) jobs.push(saveShared(CATEGORIES_KEY, next.categories));
       if (next.subcategories) jobs.push(saveShared(SUBCATEGORIES_KEY, next.subcategories));
-      if (next.trash) jobs.push(saveShared(TRASH_KEY, next.trash));
+      if (next.trash) jobs.push(syncKind("trash", next.trash));
+      if (next.notices) jobs.push(saveShared(NOTICES_KEY, next.notices));
       if (next.teams) jobs.push(saveShared(TEAMS_KEY, next.teams));
       if (next.favorites) jobs.push(saveShared(FAVORITES_KEY, next.favorites));
-      if (next.alarms) jobs.push(saveShared(ALARMS_KEY, next.alarms));
+      if (next.alarms) jobs.push(syncKind("alarm", next.alarms));
       if (next.customTabs) jobs.push(saveShared(CUSTOM_TABS_KEY, next.customTabs));
       const ok = await Promise.all(jobs);
       setSaving(false);
@@ -571,11 +772,16 @@
     const pushAlarms = async (recipients, message, nav) => {
       if (!recipients || recipients.length === 0) return;
       const newOnes = recipients.map((empId) => ({ id: uid(), toEmpId: empId, message, createdAt: dotFormat(isoToday()), read: false, nav }));
-      setAlarms((prev) => {
-        const next = [...prev, ...newOnes];
-        persist({ alarms: next });
-        return next;
-      });
+      const mine = newOnes.filter((a) => a.toEmpId === me.empId);
+      const others = newOnes.filter((a) => a.toEmpId !== me.empId);
+      await Promise.all(others.map((a) => putKind("alarm", a.id, a)));
+      if (mine.length > 0) {
+        setAlarms((prev) => {
+          const next = [...prev, ...mine];
+          persist({ alarms: next });
+          return next;
+        });
+      }
     };
     const markAlarmRead = (alarm) => {
       if (alarm.read) return;
@@ -585,6 +791,10 @@
     };
     const pushTrash = async (type, data, meta = null, byEmpId = null) => {
       const item = { trashId: uid(), type, deletedBy: byEmpId || me.empId, deletedAt: (/* @__PURE__ */ new Date()).toISOString(), data, meta };
+      if (item.deletedBy !== me.empId) {
+        await putKind("trash", item.trashId, item);
+        return;
+      }
       const next = [item, ...trash];
       setTrash(next);
       await persist({ trash: next });
@@ -834,6 +1044,7 @@
         attachment: form.attachment || null,
         dueDate: form.dueDate || null,
         createdAt: dotFormat(isoToday()),
+        createdTs: Date.now(),
         completions: {},
         memos: [],
         registrant: { empId: me.empId, name: me.name, team: me.team }
@@ -934,6 +1145,409 @@
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
+    };
+    const addNotice = async (form) => {
+      if (!me.isAdmin) return false;
+      const notice = {
+        id: uid(),
+        title: form.title.trim(),
+        body: form.body.trim(),
+        createdAt: dotFormat(isoToday()),
+        author: { empId: me.empId, name: me.name },
+        attachment: form.attachment || null
+      };
+      const next = [notice, ...notices];
+      setNotices(next);
+      const ok = await persist({ notices: next });
+      flash(ok ? "\uACF5\uC9C0\uC0AC\uD56D\uC774 \uB4F1\uB85D\uB418\uC5C8\uC2B5\uB2C8\uB2E4." : "\uC800\uC7A5 \uC911 \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4.");
+      return ok;
+    };
+    const deleteNotice = async (notice) => {
+      if (!me.isAdmin) return;
+      const confirmed = await askConfirm(`\uD574\uB2F9 \uACF5\uC9C0(${notice.title})\uB97C
+\uC815\uB9D0 \uC0AD\uC81C\uD558\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?`);
+      if (!confirmed) return;
+      const next = notices.filter((n) => n.id !== notice.id);
+      setNotices(next);
+      const ok = await persist({ notices: next });
+      flash(ok ? "\uC0AD\uC81C\uB418\uC5C8\uC2B5\uB2C8\uB2E4." : "\uC800\uC7A5 \uC911 \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4.");
+    };
+    const updateNotice = async (id, form) => {
+      if (!me.isAdmin) return false;
+      const next = notices.map((n) => n.id === id ? { ...n, title: form.title.trim(), body: form.body.trim(), attachment: form.attachment || null, updatedAt: dotFormat(isoToday()) } : n);
+      setNotices(next);
+      const ok = await persist({ notices: next });
+      flash(ok ? "\uACF5\uC9C0\uC0AC\uD56D\uC774 \uC218\uC815\uB418\uC5C8\uC2B5\uB2C8\uB2E4." : "\uC800\uC7A5 \uC911 \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4.");
+      return ok;
+    };
+    const SINGLE_BACKUP_KEYS = {
+      users: USERS_KEY,
+      signups: SIGNUPS_KEY,
+      products: PRODUCTS_KEY,
+      requests: REQUESTS_KEY,
+      tabLabels: LABELS_KEY,
+      categories: CATEGORIES_KEY,
+      subcategories: SUBCATEGORIES_KEY,
+      teams: TEAMS_KEY,
+      favorites: FAVORITES_KEY,
+      customTabs: CUSTOM_TABS_KEY,
+      notices: NOTICES_KEY
+    };
+    const buildBackupPayload = async () => {
+      const data = {};
+      for (const [name, key] of Object.entries(SINGLE_BACKUP_KEYS)) data[name] = await loadShared(key, null);
+      data.changes = await listKind("change");
+      data.archived = await listKind("archived");
+      data.alarms = await listKind("alarm");
+      data.trash = await listKind("trash");
+      if (!Array.isArray(data.users) || data.users.length === 0 || data.changes === null || data.archived === null || data.alarms === null || data.trash === null) {
+        throw new Error("load-failed");
+      }
+      const fileIds = /* @__PURE__ */ new Set();
+      const walk = (v) => {
+        if (!v || typeof v !== "object") return;
+        if (Array.isArray(v)) {
+          v.forEach(walk);
+          return;
+        }
+        if (v.id && v.fileName && v.fileType !== void 0) fileIds.add(v.id);
+        Object.values(v).forEach(walk);
+      };
+      walk(data);
+      const files = {};
+      const missingFiles = [];
+      for (const id of fileIds) {
+        const f = await loadShared(`revledger:file:${id}`, null);
+        if (f) files[id] = f;
+        else missingFiles.push(id);
+      }
+      return { app: "revision-ledger", version: "v6", exportedAt: (/* @__PURE__ */ new Date()).toISOString(), exportedBy: me.empId, data, files, missingFiles };
+    };
+    const downloadJson = (payload, prefix) => {
+      const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
+      const now = /* @__PURE__ */ new Date();
+      const pad = (n) => String(n).padStart(2, "0");
+      const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${prefix}-${stamp}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 5e3);
+    };
+    const backupAllData = async () => {
+      if (!me.isAdmin) return;
+      const confirmed = await askConfirm("\uC804\uCCB4 \uB370\uC774\uD130\uB97C \uBC31\uC5C5 \uD30C\uC77C\uB85C \uB0B4\uB824\uBC1B\uC2B5\uB2C8\uB2E4.\n(\uBE44\uBC00\uBC88\uD638 \uB4F1 \uBBFC\uAC10\uC815\uBCF4\uAC00 \uD3EC\uD568\uB418\uB2C8 \uC548\uC804\uD558\uAC8C \uBCF4\uAD00\uD558\uC138\uC694)");
+      if (!confirmed) return;
+      flash("\uBC31\uC5C5 \uD30C\uC77C\uC744 \uB9CC\uB4DC\uB294 \uC911\uC785\uB2C8\uB2E4\u2026");
+      try {
+        const payload = await buildBackupPayload();
+        downloadJson(payload, "revledger-backup");
+        flash(payload.missingFiles.length > 0 ? `\uBC31\uC5C5 \uC644\uB8CC (\uCCA8\uBD80\uD30C\uC77C ${payload.missingFiles.length}\uAC1C\uB294 \uCC3E\uC9C0 \uBABB\uD574 \uC81C\uC678\uB428)` : `\uBC31\uC5C5 \uC644\uB8CC (\uCCA8\uBD80\uD30C\uC77C ${Object.keys(payload.files).length}\uAC1C \uD3EC\uD568)`);
+      } catch (e) {
+        flash("\uB370\uC774\uD130\uB97C \uBD88\uB7EC\uC624\uC9C0 \uBABB\uD574 \uBC31\uC5C5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. \uC7A0\uC2DC \uD6C4 \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694.");
+      }
+    };
+    const restoreFromBackup = async (file) => {
+      if (!me.isAdmin) return;
+      let payload;
+      try {
+        payload = JSON.parse(await file.text());
+      } catch (e) {
+        flash("\uBC31\uC5C5 \uD30C\uC77C\uC744 \uC77D\uC744 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4. (.json \uBC31\uC5C5 \uD30C\uC77C\uC778\uC9C0 \uD655\uC778\uD574 \uC8FC\uC138\uC694)");
+        return;
+      }
+      const d = payload == null ? void 0 : payload.data;
+      if ((payload == null ? void 0 : payload.app) !== "revision-ledger" || !d) {
+        flash("\uC774 \uC0AC\uC774\uD2B8\uC758 \uBC31\uC5C5 \uD30C\uC77C\uC774 \uC544\uB2D9\uB2C8\uB2E4.");
+        return;
+      }
+      if (!Array.isArray(d.users) || d.users.length === 0 || !d.users.some((u) => u.isAdmin)) {
+        flash("\uBC31\uC5C5 \uD30C\uC77C\uC5D0 \uAD00\uB9AC\uC790 \uACC4\uC815\uC774 \uC5C6\uC5B4 \uBCF5\uC6D0\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4.");
+        return;
+      }
+      if (!Array.isArray(d.changes)) {
+        flash("\uBC31\uC5C5 \uD30C\uC77C\uC5D0 \uBCC0\uACBD \uC774\uB825 \uB370\uC774\uD130\uAC00 \uC5C6\uC5B4 \uBCF5\uC6D0\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4.");
+        return;
+      }
+      const when = payload.exportedAt ? new Date(payload.exportedAt).toLocaleString("ko-KR") : "\uC54C \uC218 \uC5C6\uC74C";
+      const confirmed = await askConfirm(`\uBC31\uC5C5 \uC2DC\uC810(${when})\uC73C\uB85C \uBCF5\uC6D0\uD569\uB2C8\uB2E4.
+\uD604\uC7AC \uB370\uC774\uD130\uB294 \uBAA8\uB450 \uB36E\uC5B4\uC368\uC9C0\uBA70,
+\uBCF5\uC6D0 \uC804\uC5D0 \uD604\uC7AC \uB370\uC774\uD130\uB97C \uC790\uB3D9 \uBC31\uC5C5\uD569\uB2C8\uB2E4.
+\uC9C4\uD589\uD558\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?`);
+      if (!confirmed) return;
+      try {
+        flash("\uBCF5\uC6D0 \uC804 \uD604\uC7AC \uB370\uC774\uD130\uB97C \uBC31\uC5C5\uD558\uB294 \uC911\u2026");
+        const current = await buildBackupPayload();
+        downloadJson(current, "revledger-before-restore");
+      } catch (e) {
+        flash("\uBCF5\uC6D0 \uC804 \uD604\uC7AC \uB370\uC774\uD130 \uBC31\uC5C5\uC5D0 \uC2E4\uD328\uD574 \uBCF5\uC6D0\uC744 \uC911\uB2E8\uD588\uC2B5\uB2C8\uB2E4.");
+        return;
+      }
+      flash("\uBCF5\uC6D0 \uC911\uC785\uB2C8\uB2E4. \uC7A0\uC2DC\uB9CC \uAE30\uB2E4\uB824 \uC8FC\uC138\uC694\u2026");
+      let failed = 0;
+      for (const [name, key] of Object.entries(SINGLE_BACKUP_KEYS)) {
+        if (d[name] === null || d[name] === void 0) continue;
+        if (!await saveShared(key, d[name])) failed++;
+      }
+      const fileEntries = Object.entries(payload.files || {});
+      const fileResults = await runLimited(fileEntries.map(([id, f]) => () => saveShared(`revledger:file:${id}`, f)), 5);
+      failed += fileResults.filter((r) => !r).length;
+      const kinds = [
+        ["change", d.changes],
+        ["archived", d.archived],
+        ["alarm", d.alarms],
+        ["trash", d.trash]
+      ];
+      for (const [kind, arrRaw] of kinds) {
+        if (!Array.isArray(arrRaw)) continue;
+        const idField = idFieldOf(kind);
+        const base = Date.now();
+        const arr = kind === "change" || kind === "archived" ? arrRaw.map((c, i) => {
+          var _a;
+          return { ...c, createdTs: (_a = c.createdTs) != null ? _a : base - i };
+        }) : arrRaw;
+        const existing = await listKind(kind);
+        const keep = new Set(arr.map((x) => x[idField]));
+        const jobs = [];
+        (existing || []).forEach((x) => {
+          if (!keep.has(x[idField])) jobs.push(() => deleteKind(kind, x[idField]));
+        });
+        arr.forEach((x) => jobs.push(() => putKind(kind, x[idField], x)));
+        const results = await runLimited(jobs);
+        failed += results.filter((r) => !r).length;
+      }
+      await saveShared(MIGRATION_KEY, { at: (/* @__PURE__ */ new Date()).toISOString(), restoredFrom: payload.exportedAt || null });
+      if (failed > 0) {
+        flash(`\uBCF5\uC6D0 \uC911 ${failed}\uAC74\uC5D0\uC11C \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4. \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694.`);
+        return;
+      }
+      flash("\uBCF5\uC6D0\uC774 \uC644\uB8CC\uB418\uC5C8\uC2B5\uB2C8\uB2E4. \uD654\uBA74\uC744 \uC0C8\uB85C\uACE0\uCE68\uD569\uB2C8\uB2E4.");
+      setTimeout(() => window.location.reload(), 1500);
+    };
+    const getArchiveCandidates = (months) => {
+      const d = /* @__PURE__ */ new Date();
+      d.setMonth(d.getMonth() - months);
+      const pad = (n) => String(n).padStart(2, "0");
+      const cutoff = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+      return changes.filter((c) => {
+        const st = statusOf(c, products);
+        return st.allDone && st.lastDate && st.lastDate < cutoff;
+      });
+    };
+    const archiveOldChanges = async (months) => {
+      if (!me.isAdmin) return;
+      const cands = getArchiveCandidates(months);
+      if (cands.length === 0) {
+        flash("\uBCF4\uAD00\uD560 \uBCC0\uACBD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.");
+        return;
+      }
+      const confirmed = await askConfirm(`\uC644\uB8CC \uD6C4 ${months}\uAC1C\uC6D4\uC774 \uC9C0\uB09C \uBCC0\uACBD ${cands.length}\uAC74\uC744
+\uBCF4\uAD00\uD568\uC73C\uB85C \uC774\uB3D9\uD569\uB2C8\uB2E4.
+(\uBCF4\uAD00\uD568 \uD0ED\uC5D0\uC11C \uC870\uD68C\uD558\uACE0 \uBCF5\uC6D0\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4)`);
+      if (!confirmed) return;
+      flash("\uBCF4\uAD00\uD568\uC73C\uB85C \uC774\uB3D9 \uC911\uC785\uB2C8\uB2E4\u2026");
+      const records = cands.map((c) => ({
+        ...c,
+        archivedAt: dotFormat(isoToday()),
+        productNames: Object.fromEntries(c.productIds.map((id) => {
+          var _a;
+          return [id, (_a = products.find((p) => p.id === id)) == null ? void 0 : _a.name];
+        }).filter(([, n]) => n))
+      }));
+      const results = await runLimited(records.map((r) => () => putKind("archived", r.id, r)));
+      if (!results.every(Boolean)) {
+        flash("\uBCF4\uAD00 \uC911 \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4. \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694.");
+        return;
+      }
+      const ids = new Set(cands.map((c) => c.id));
+      const next = changes.filter((c) => !ids.has(c.id));
+      setChanges(next);
+      const ok = await persist({ changes: next });
+      if (archived !== null) setArchived(sortChangesDesc([...records, ...archived]));
+      flash(ok ? `${records.length}\uAC74\uC744 \uBCF4\uAD00\uD568\uC73C\uB85C \uC774\uB3D9\uD588\uC2B5\uB2C8\uB2E4.` : "\uC800\uC7A5 \uC911 \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4.");
+    };
+    const restoreArchivedChange = async (rec) => {
+      if (!me.isAdmin) return;
+      const confirmed = await askConfirm(`\uD574\uB2F9 \uBCC0\uACBD(${rec.docNumber})\uC744
+\uBCF4\uAD00\uD568\uC5D0\uC11C \uAEBC\uB0B4 \uBCF5\uC6D0\uD558\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?`);
+      if (!confirmed) return;
+      const { archivedAt, productNames, ...orig } = rec;
+      const next = [orig, ...changes];
+      setChanges(next);
+      const ok = await persist({ changes: next });
+      if (!ok) {
+        flash("\uC800\uC7A5 \uC911 \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4.");
+        return;
+      }
+      await deleteKind("archived", rec.id);
+      setArchived((prev) => (prev || []).filter((x) => x.id !== rec.id));
+      flash("\uBCC0\uACBD\uC774 \uBCF5\uC6D0\uB418\uC5C8\uC2B5\uB2C8\uB2E4.");
+    };
+    const downloadChangeTemplate = () => {
+      const sample = products.slice(0, 2).map((p) => p.name).join(", ") || "\uC81C\uD488A, \uC81C\uD488B";
+      const aoa = [
+        ["\uBCC0\uACBD\uBB38\uC11C\uBC88\uD638", "\uBCC0\uACBD\uBA85", "\uBCC0\uACBD \uB0B4\uC6A9", "\uD2B9\uC774\uC0AC\uD56D", "\uC644\uB8CC\uC608\uC815\uC77C", "\uAD00\uB828\uC81C\uD488"],
+        ["CC-260101-01", "\uC608) \uC6D0\uB8CC \uC81C\uC870\uC6D0 \uCD94\uAC00", "\uC608) \uC81C\uAC1C\uC815\uC774\uB825\uC5D0 \uAE30\uC7AC\uB420 \uBB38\uAD6C", "", "20260131", sample]
+      ];
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      ws["!cols"] = [{ wch: 18 }, { wch: 26 }, { wch: 40 }, { wch: 24 }, { wch: 14 }, { wch: 36 }];
+      const guide = XLSX.utils.aoa_to_sheet([
+        ["\uC791\uC131 \uC548\uB0B4"],
+        ["\xB7 \uCCAB \uBC88\uC9F8 \uC2DC\uD2B8\uC758 1\uD589(\uC81C\uBAA9\uD589)\uC740 \uC218\uC815\uD558\uC9C0 \uB9C8\uC138\uC694. 2\uD589\uC758 \uC608\uC2DC\uB294 \uC9C0\uC6B0\uACE0 \uC791\uC131\uD558\uC138\uC694."],
+        ["\xB7 \uBCC0\uACBD\uBB38\uC11C\uBC88\uD638\uB294 \uD544\uC218\uC785\uB2C8\uB2E4. \uC774\uBBF8 \uB4F1\uB85D\uB41C \uBB38\uC11C\uBC88\uD638\uB294 \uAC74\uB108\uB701\uB2C8\uB2E4."],
+        ["\xB7 \uAD00\uB828\uC81C\uD488(\uC120\uD0DD): \uC81C\uD488\uBA85, \uC81C\uD615\uBA85, \uBB38\uC11C\uD568\uBA85\uC744 \uC27C\uD45C(,)\uB85C \uAD6C\uBD84\uD574\uC11C \uC801\uC73C\uC138\uC694. \uBE44\uC6CC\uB450\uBA74 \uC81C\uD488 \uC5C6\uC774 \uB4F1\uB85D\uB429\uB2C8\uB2E4."],
+        ["\xB7 \uC81C\uD615\uBA85 \uB610\uB294 \uBB38\uC11C\uD568\uBA85\uC744 \uC801\uC73C\uBA74 \uADF8 \uC548\uC5D0 \uC788\uB294 \uBAA8\uB4E0 \uC81C\uD488\uC774 \uD55C \uBC88\uC5D0 \uC5F0\uACB0\uB429\uB2C8\uB2E4."],
+        ["\xB7 \uC644\uB8CC\uC608\uC815\uC77C(\uC120\uD0DD): 20260131 \uB610\uB294 2026-01-31 \uD615\uC2DD\uC73C\uB85C \uC801\uC73C\uC138\uC694."],
+        ["\xB7 \uB4F1\uB85D\uC790\uB294 \uC77C\uAD04\uB4F1\uB85D\uC744 \uC2E4\uD589\uD55C \uBCF8\uC778\uC73C\uB85C \uC790\uB3D9 \uC9C0\uC815\uB429\uB2C8\uB2E4."]
+      ]);
+      guide["!cols"] = [{ wch: 95 }];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "\uBCC0\uACBD\uBAA9\uB85D");
+      XLSX.utils.book_append_sheet(wb, guide, "\uC791\uC131\uC548\uB0B4");
+      XLSX.writeFile(wb, "\uBCC0\uACBD_\uC77C\uAD04\uB4F1\uB85D_\uC591\uC2DD.xlsx");
+    };
+    const importChangesFromExcel = async (file) => {
+      var _a, _b, _c;
+      setImportingChanges(true);
+      try {
+        const buf = await file.arrayBuffer();
+        const wb = XLSX.read(buf, { type: "array" });
+        const aliasNorm = {};
+        Object.entries(CHANGE_IMPORT_ALIASES).forEach(([k, list]) => {
+          aliasNorm[k] = list.map(normHeader);
+        });
+        let found = null;
+        for (let i = 0; i < wb.SheetNames.length && !found; i++) {
+          if ((_c = (_b = (_a = wb.Workbook) == null ? void 0 : _a.Sheets) == null ? void 0 : _b[i]) == null ? void 0 : _c.Hidden) continue;
+          const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[i]], { header: 1, defval: "", raw: true });
+          for (let r = 0; r < Math.min(rows.length, 15); r++) {
+            const cols = {};
+            rows[r].forEach((cell, ci) => {
+              const n = normHeader(cell);
+              if (!n) return;
+              Object.keys(aliasNorm).forEach((k) => {
+                if (cols[k] === void 0 && aliasNorm[k].includes(n)) cols[k] = ci;
+              });
+            });
+            if (cols.docNumber !== void 0) {
+              found = { rows, headerRow: r, cols };
+              break;
+            }
+          }
+        }
+        if (!found) {
+          setImportResult({ error: "\uC5D1\uC140\uC5D0\uC11C '\uBCC0\uACBD\uBB38\uC11C\uBC88\uD638' \uC81C\uBAA9\uC774 \uC788\uB294 \uC2DC\uD2B8\uB97C \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.\n'\uC591\uC2DD \uB2E4\uC6B4\uB85C\uB4DC'\uB85C \uBC1B\uC740 \uC591\uC2DD\uC758 1\uD589 \uC81C\uBAA9\uC744 \uADF8\uB300\uB85C \uC0AC\uC6A9\uD574 \uC8FC\uC138\uC694." });
+          return;
+        }
+        const productsByName = /* @__PURE__ */ new Map();
+        products.forEach((p) => {
+          const k = normHeader(p.name);
+          productsByName.set(k, [...productsByName.get(k) || [], p]);
+        });
+        const resolveProducts = (names) => {
+          const ids = [];
+          const missing = [];
+          const add = (id) => {
+            if (!ids.includes(id)) ids.push(id);
+          };
+          names.forEach((n) => {
+            const k = normHeader(n);
+            let matched = false;
+            (productsByName.get(k) || []).forEach((p) => {
+              matched = true;
+              add(p.id);
+            });
+            subcategories.filter((s) => normHeader(s.name) === k).forEach((s) => {
+              matched = true;
+              products.filter((p) => p.subcategoryId === s.id).forEach((p) => add(p.id));
+            });
+            categories.filter((c) => normHeader(c.name) === k).forEach((c) => {
+              matched = true;
+              products.filter((p) => p.categoryId === c.id).forEach((p) => add(p.id));
+            });
+            if (!matched) missing.push(n);
+          });
+          return { ids, missing };
+        };
+        const existingDocs = new Set(changes.map((c) => c.docNumber.trim().toLowerCase()));
+        const skipped = [];
+        const records = [];
+        for (let r = found.headerRow + 1; r < found.rows.length; r++) {
+          const row = found.rows[r];
+          if (!row.some((cell) => String(cell).trim() !== "")) continue;
+          const get = (k) => found.cols[k] === void 0 ? "" : row[found.cols[k]];
+          const rowNo = r + 1;
+          const docNumber = String(get("docNumber")).trim();
+          if (!docNumber) {
+            skipped.push({ rowNo, docNumber: "-", reason: "\uBCC0\uACBD\uBB38\uC11C\uBC88\uD638\uAC00 \uBE44\uC5B4 \uC788\uC74C" });
+            continue;
+          }
+          const docKey = docNumber.toLowerCase();
+          if (existingDocs.has(docKey)) {
+            skipped.push({ rowNo, docNumber, reason: "\uC774\uBBF8 \uB4F1\uB85D\uB41C \uBCC0\uACBD\uBB38\uC11C\uBC88\uD638" });
+            continue;
+          }
+          const names = String(get("products")).split(/[,，、;；\n]+/).map((s) => s.trim()).filter(Boolean);
+          const { ids: productIds, missing } = resolveProducts(names);
+          if (missing.length > 0) {
+            skipped.push({ rowNo, docNumber, reason: `\uB4F1\uB85D\uB418\uC9C0 \uC54A\uC740 \uC81C\uD488/\uC81C\uD615/\uBB38\uC11C\uD568: ${missing.join(", ")}` });
+            continue;
+          }
+          const due = parseImportDate(get("dueDate"));
+          if (!due.ok) {
+            skipped.push({ rowNo, docNumber, reason: "\uC644\uB8CC\uC608\uC815\uC77C \uD615\uC2DD \uC624\uB958 (\uC608: 20260131)" });
+            continue;
+          }
+          records.push({
+            id: uid(),
+            docNumber,
+            changeName: String(get("changeName")).trim(),
+            historyText: String(get("historyText")).trim(),
+            noteText: String(get("noteText")).trim(),
+            productIds,
+            attachment: null,
+            dueDate: due.value || null,
+            createdAt: dotFormat(isoToday()),
+            completions: {},
+            memos: [],
+            registrant: { empId: me.empId, name: me.name, team: me.team }
+          });
+          existingDocs.add(docKey);
+        }
+        if (records.length === 0) {
+          setImportResult({ added: 0, skipped, addedRows: [] });
+          return;
+        }
+        const base = Date.now();
+        records.forEach((rec, i) => {
+          rec.createdTs = base + (records.length - i);
+        });
+        const nextChanges = [...records, ...changes];
+        setChanges(nextChanges);
+        const ok = await persist({ changes: nextChanges });
+        if (!ok) {
+          setImportResult({ error: "\uC800\uC7A5 \uC911 \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4. \uC7A0\uC2DC \uD6C4 \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694." });
+          return;
+        }
+        setImportResult({
+          added: records.length,
+          skipped,
+          addedRows: records.map((rec) => ({ docNumber: rec.docNumber, productCount: rec.productIds.length }))
+        });
+      } catch (e) {
+        setImportResult({ error: "\uC5D1\uC140 \uD30C\uC77C\uC744 \uC77D\uB294 \uC911 \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4. \uD30C\uC77C \uD615\uC2DD(.xlsx)\uC744 \uD655\uC778\uD574 \uC8FC\uC138\uC694." });
+      } finally {
+        setImportingChanges(false);
+      }
+    };
+    const handleChangeImportPick = async (e) => {
+      var _a;
+      const f = (_a = e.target.files) == null ? void 0 : _a[0];
+      e.target.value = "";
+      if (f) await importChangesFromExcel(f);
     };
     const resolveMentionRecipients = (taggedEmpIds, taggedTeamIds) => {
       const set = new Set((taggedEmpIds || []).filter((id) => id !== me.empId));
@@ -1162,7 +1776,7 @@
     ), /* @__PURE__ */ React.createElement("div", { style: styles.headerSub }, "\uBCC0\uACBD \uB4F1\uB85D \uC2DC \uAD00\uB828 \uC81C\uD488\uC758 \uAC1C\uC815 \uC774\uB825\uC5D0 \uC790\uB3D9 \uBC18\uC601\uB429\uB2C8\uB2E4")), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 14 } }, /* @__PURE__ */ React.createElement("div", { style: styles.meBox }, /* @__PURE__ */ React.createElement("span", { style: styles.meName }, me.name), /* @__PURE__ */ React.createElement("span", { style: styles.meId }, me.empId, " \xB7 ", teamName(teams, me.team), me.isAdmin ? " \xB7 \uAD00\uB9AC\uC790" : ""), /* @__PURE__ */ React.createElement("span", { style: styles.switchLink, onClick: () => setShowPwModal(true) }, "\uBE44\uBC00\uBC88\uD638 \uBCC0\uACBD"), /* @__PURE__ */ React.createElement("span", { style: styles.switchLink, onClick: logout }, "\uB85C\uADF8\uC544\uC6C3")), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: () => setShowForm(true) }, "\uBCC0\uACBD \uB4F1\uB85D"))), /* @__PURE__ */ React.createElement("nav", { style: styles.topNav }, /* @__PURE__ */ React.createElement("button", { style: { ...styles.navBtn, ...selection.type === "mytask" ? styles.navBtnActive : {} }, onClick: () => setSelection({ type: "mytask" }) }, tabLabels.mytask, " ", /* @__PURE__ */ React.createElement("span", { style: styles.navCount }, changes.filter((c) => {
       var _a;
       return ((_a = c.registrant) == null ? void 0 : _a.empId) === me.empId;
-    }).length)), /* @__PURE__ */ React.createElement("button", { style: { ...styles.navBtn, ...selection.type === "all" ? styles.navBtnActive : {} }, onClick: () => setSelection({ type: "all" }) }, tabLabels.all, " ", /* @__PURE__ */ React.createElement("span", { style: styles.navCount }, changes.length)), /* @__PURE__ */ React.createElement("button", { style: { ...styles.navBtn, ...selection.type === "users" ? styles.navBtnActive : {} }, onClick: () => setSelection({ type: "users" }) }, tabLabels.users, " ", /* @__PURE__ */ React.createElement("span", { style: styles.navCount }, users.length)), /* @__PURE__ */ React.createElement("button", { style: { ...styles.navBtn, ...selection.type === "viewUser" ? styles.navBtnActive : {} }, onClick: () => setSelection({ type: "viewUser", targetEmpId: selection.targetEmpId || null }) }, "\uAC1C\uC778\uBCC4 \uBCC0\uACBD \uC774\uB825 \uC870\uD68C"), customTabs.map((tab) => /* @__PURE__ */ React.createElement("button", { key: tab.id, style: { ...styles.navBtn, ...selection.type === "customtab" && selection.tabId === tab.id ? styles.navBtnActive : {} }, onClick: () => setSelection({ type: "customtab", tabId: tab.id }) }, tab.label)), me.isAdmin && /* @__PURE__ */ React.createElement("button", { style: { ...styles.navBtn, ...selection.type === "admin" ? styles.navBtnActive : {} }, onClick: () => setSelection({ type: "admin" }) }, tabLabels.admin, requests.length + signups.length > 0 && /* @__PURE__ */ React.createElement("span", { style: styles.navCountAlert }, requests.length + signups.length)), /* @__PURE__ */ React.createElement("button", { style: { ...styles.navBtn, ...selection.type === "alarms" ? styles.navBtnActive : {} }, onClick: () => setSelection({ type: "alarms" }) }, "\uC54C\uB78C", myUnreadAlarms.length > 0 && /* @__PURE__ */ React.createElement("span", { style: styles.navCountAlert }, myUnreadAlarms.length)), /* @__PURE__ */ React.createElement("button", { style: { ...styles.navBtn, ...selection.type === "trash" ? styles.navBtnActive : {} }, onClick: () => setSelection({ type: "trash" }) }, "\uB0B4 \uD734\uC9C0\uD1B5", myTrash.length > 0 && /* @__PURE__ */ React.createElement("span", { style: styles.navCount }, myTrash.length)), me.isAdmin && /* @__PURE__ */ React.createElement("button", { style: styles.navEditBtn, onClick: () => setShowLabelsModal(true), title: "\uD0ED \uAD00\uB9AC" }, "\u270E \uD0ED \uAD00\uB9AC")), /* @__PURE__ */ React.createElement("div", { style: styles.bodyRow }, /* @__PURE__ */ React.createElement("aside", { style: styles.sidebar }, /* @__PURE__ */ React.createElement(
+    }).length)), /* @__PURE__ */ React.createElement("button", { style: { ...styles.navBtn, ...selection.type === "all" ? styles.navBtnActive : {} }, onClick: () => setSelection({ type: "all" }) }, tabLabels.all, " ", /* @__PURE__ */ React.createElement("span", { style: styles.navCount }, changes.length)), /* @__PURE__ */ React.createElement("button", { style: { ...styles.navBtn, ...selection.type === "users" ? styles.navBtnActive : {} }, onClick: () => setSelection({ type: "users" }) }, tabLabels.users, " ", /* @__PURE__ */ React.createElement("span", { style: styles.navCount }, users.length)), /* @__PURE__ */ React.createElement("button", { style: { ...styles.navBtn, ...selection.type === "viewUser" ? styles.navBtnActive : {} }, onClick: () => setSelection({ type: "viewUser", targetEmpId: selection.targetEmpId || null }) }, "\uAC1C\uC778\uBCC4 \uBCC0\uACBD \uC774\uB825 \uC870\uD68C"), customTabs.map((tab) => /* @__PURE__ */ React.createElement("button", { key: tab.id, style: { ...styles.navBtn, ...selection.type === "customtab" && selection.tabId === tab.id ? styles.navBtnActive : {} }, onClick: () => setSelection({ type: "customtab", tabId: tab.id }) }, tab.label)), /* @__PURE__ */ React.createElement("button", { style: { ...styles.navBtn, ...selection.type === "notices" ? styles.navBtnActive : {} }, onClick: () => setSelection({ type: "notices" }) }, "\uACF5\uC9C0\uC0AC\uD56D ", /* @__PURE__ */ React.createElement("span", { style: styles.navCount }, notices.length)), me.isAdmin && /* @__PURE__ */ React.createElement("button", { style: { ...styles.navBtn, ...selection.type === "admin" ? styles.navBtnActive : {} }, onClick: () => setSelection({ type: "admin" }) }, tabLabels.admin, requests.length + signups.length > 0 && /* @__PURE__ */ React.createElement("span", { style: styles.navCountAlert }, requests.length + signups.length)), /* @__PURE__ */ React.createElement("button", { style: { ...styles.navBtn, ...selection.type === "alarms" ? styles.navBtnActive : {} }, onClick: () => setSelection({ type: "alarms" }) }, "\uC54C\uB78C", myUnreadAlarms.length > 0 && /* @__PURE__ */ React.createElement("span", { style: styles.navCountAlert }, myUnreadAlarms.length)), /* @__PURE__ */ React.createElement("button", { style: { ...styles.navBtn, ...selection.type === "trash" ? styles.navBtnActive : {} }, onClick: () => setSelection({ type: "trash" }) }, "\uB0B4 \uD734\uC9C0\uD1B5", myTrash.length > 0 && /* @__PURE__ */ React.createElement("span", { style: styles.navCount }, myTrash.length)), /* @__PURE__ */ React.createElement("button", { style: { ...styles.navBtn, ...selection.type === "archive" ? styles.navBtnActive : {} }, onClick: () => setSelection({ type: "archive" }) }, "\uBCF4\uAD00\uD568"), me.isAdmin && /* @__PURE__ */ React.createElement("button", { style: styles.navEditBtn, onClick: () => setShowLabelsModal(true), title: "\uD0ED \uAD00\uB9AC" }, "\u270E \uD0ED \uAD00\uB9AC")), /* @__PURE__ */ React.createElement("div", { style: styles.bodyRow }, /* @__PURE__ */ React.createElement("aside", { style: styles.sidebar }, /* @__PURE__ */ React.createElement(
       "input",
       {
         style: { ...styles.searchInput, width: "100%", boxSizing: "border-box", marginBottom: 12, flexShrink: 0 },
@@ -1283,7 +1897,11 @@
         onReject: rejectRequest,
         signups,
         onApproveSignup: approveSignup,
-        onRejectSignup: rejectSignup
+        onRejectSignup: rejectSignup,
+        onBackup: backupAllData,
+        onRestore: restoreFromBackup,
+        getArchiveCandidates,
+        onArchive: archiveOldChanges
       }
     ) : selection.type === "users" ? /* @__PURE__ */ React.createElement(
       UsersDirectory,
@@ -1301,7 +1919,10 @@
         onAddUserDirect: addUserDirect,
         onViewUser: (empId) => setSelection({ type: "viewUser", targetEmpId: empId })
       }
-    ) : selection.type === "alarms" ? /* @__PURE__ */ React.createElement(AlarmsPanel, { alarms: myAlarms, onNavigate: openAlarm, onMarkRead: markAlarmRead }) : selection.type === "trash" ? /* @__PURE__ */ React.createElement(TrashPanel, { trash: myTrash, products, categories, onRestore: restoreTrashItem, onPermanentDelete: permanentlyDeleteTrashItem }) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: styles.mainHeaderRow }, /* @__PURE__ */ React.createElement("h2", { style: styles.mainTitle }, mainTitle), /* @__PURE__ */ React.createElement("span", { style: styles.mainCount }, visibleChanges.length, "\uAC74"), /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }), selection.type === "viewUser" && /* @__PURE__ */ React.createElement(
+    ) : selection.type === "archive" ? /* @__PURE__ */ React.createElement(ArchivePanel, { archived, isAdmin: me.isAdmin, onRestore: restoreArchivedChange, onDownloadFile: downloadMemoFile }) : selection.type === "notices" ? /* @__PURE__ */ React.createElement(NoticesPanel, { notices, isAdmin: me.isAdmin, onAdd: addNotice, onUpdate: updateNotice, onDelete: deleteNotice, onUploadFile: uploadMemoFile, onDownloadFile: downloadMemoFile }) : selection.type === "alarms" ? /* @__PURE__ */ React.createElement(AlarmsPanel, { alarms: myAlarms, onNavigate: openAlarm, onMarkRead: markAlarmRead }) : selection.type === "trash" ? /* @__PURE__ */ React.createElement(TrashPanel, { trash: myTrash, products, categories, onRestore: restoreTrashItem, onPermanentDelete: permanentlyDeleteTrashItem }) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: styles.mainHeaderRow }, /* @__PURE__ */ React.createElement("h2", { style: styles.mainTitle }, mainTitle), /* @__PURE__ */ React.createElement("span", { style: styles.mainCount }, visibleChanges.length, "\uAC74"), /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }), selection.type === "mytask" && /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 6, marginRight: 8 } }, /* @__PURE__ */ React.createElement("input", { ref: changeImportRef, type: "file", accept: ".xlsx,.xls", style: { display: "none" }, onChange: handleChangeImportPick }), /* @__PURE__ */ React.createElement("button", { style: styles.smallGhostBtn, onClick: downloadChangeTemplate }, "\uC591\uC2DD \uB2E4\uC6B4\uB85C\uB4DC"), /* @__PURE__ */ React.createElement("button", { style: styles.smallGhostBtn, disabled: importingChanges, onClick: () => {
+      var _a;
+      return (_a = changeImportRef.current) == null ? void 0 : _a.click();
+    } }, importingChanges ? "\uB4F1\uB85D \uC911\u2026" : "\u{1F4E5} \uC5D1\uC140\uB85C \uBCC0\uACBD \uC77C\uAD04 \uB4F1\uB85D")), selection.type === "viewUser" && /* @__PURE__ */ React.createElement(
       "select",
       {
         style: { ...styles.dateInput, marginRight: 8 },
@@ -1359,7 +1980,7 @@
         onRenameCustomTab: renameCustomTab,
         onDeleteCustomTab: deleteCustomTab
       }
-    ), confirmState && /* @__PURE__ */ React.createElement(ConfirmModal, { message: confirmState.message, onYes: () => resolveConfirm(true), onNo: () => resolveConfirm(false) }), toast && /* @__PURE__ */ React.createElement("div", { style: styles.toast }, toast), saving && /* @__PURE__ */ React.createElement("div", { style: styles.savingDot, title: "\uC800\uC7A5 \uC911" }));
+    ), importResult && /* @__PURE__ */ React.createElement(ImportResultModal, { result: importResult, onClose: () => setImportResult(null) }), confirmState && /* @__PURE__ */ React.createElement(ConfirmModal, { message: confirmState.message, onYes: () => resolveConfirm(true), onNo: () => resolveConfirm(false) }), toast && /* @__PURE__ */ React.createElement("div", { style: styles.toast }, toast), saving && /* @__PURE__ */ React.createElement("div", { style: styles.savingDot, title: "\uC800\uC7A5 \uC911" }));
   }
   function MoveProductControl({ product, categories, subcategories, onMove }) {
     const [open, setOpen] = useState(false);
@@ -1784,11 +2405,142 @@
       }
     } }, "\uB4F1\uB85D"), /* @__PURE__ */ React.createElement("button", { style: styles.smallGhostBtn, onClick: () => setAdding(false) }, "\uCDE8\uC18C")));
   }
-  function AdminPanel({ label, categories, teams, requests, onApprove, onReject, signups, onApproveSignup, onRejectSignup }) {
-    return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: styles.mainHeaderRow }, /* @__PURE__ */ React.createElement("h2", { style: styles.mainTitle }, label)), /* @__PURE__ */ React.createElement("div", { style: styles.sectionLabel }, "\uAC00\uC785 \uC2B9\uC778 \uB300\uAE30 ", /* @__PURE__ */ React.createElement("span", { style: styles.mainCount }, signups.length, "\uAC74")), signups.length === 0 ? /* @__PURE__ */ React.createElement("div", { style: styles.emptyStateSmall }, "\uB300\uAE30 \uC911\uC778 \uAC00\uC785 \uC694\uCCAD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.") : /* @__PURE__ */ React.createElement("div", { style: { ...styles.ledger, marginBottom: 24 } }, signups.map((s) => /* @__PURE__ */ React.createElement("div", { key: s.id, style: styles.card }, /* @__PURE__ */ React.createElement("div", { style: { padding: "13px 16px", display: "flex", alignItems: "center", gap: 12 } }, /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 14, fontWeight: 600 } }, s.name, " (", s.empId, ") ", /* @__PURE__ */ React.createElement("span", { style: styles.progressTag }, teamName(teams, s.team))), /* @__PURE__ */ React.createElement("div", { style: styles.cardMeta }, "\uC2E0\uCCAD\uC77C ", s.requestedAt)), /* @__PURE__ */ React.createElement("button", { style: styles.completeBtn, onClick: () => onApproveSignup(s) }, "\uC2B9\uC778"), /* @__PURE__ */ React.createElement("button", { style: styles.ghostBtn, onClick: () => onRejectSignup(s) }, "\uAC70\uBD80"))))), /* @__PURE__ */ React.createElement("div", { style: styles.sectionLabel }, "\uC81C\uD488 \uCD94\uAC00/\uC0AD\uC81C \uC694\uCCAD ", /* @__PURE__ */ React.createElement("span", { style: styles.mainCount }, requests.length, "\uAC74")), requests.length === 0 ? /* @__PURE__ */ React.createElement("div", { style: styles.emptyStateSmall }, "\uB300\uAE30 \uC911\uC778 \uC694\uCCAD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.") : /* @__PURE__ */ React.createElement("div", { style: styles.ledger }, requests.map((r) => {
+  function AdminPanel({ label, categories, teams, requests, onApprove, onReject, signups, onApproveSignup, onRejectSignup, onBackup, onRestore, getArchiveCandidates, onArchive }) {
+    const restoreRef = useRef(null);
+    const [months, setMonths] = useState(12);
+    const candidateCount = getArchiveCandidates(months).length;
+    const pickRestore = (e) => {
+      var _a;
+      const f = (_a = e.target.files) == null ? void 0 : _a[0];
+      e.target.value = "";
+      if (f) onRestore(f);
+    };
+    return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: styles.mainHeaderRow }, /* @__PURE__ */ React.createElement("h2", { style: styles.mainTitle }, label)), /* @__PURE__ */ React.createElement("div", { style: styles.sectionLabel }, "\uB370\uC774\uD130 \uBC31\uC5C5 \xB7 \uBCF5\uC6D0"), /* @__PURE__ */ React.createElement("div", { style: { ...styles.card, marginBottom: 24 } }, /* @__PURE__ */ React.createElement("div", { style: { padding: "13px 16px", display: "flex", alignItems: "center", gap: 10 } }, /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 14, fontWeight: 600 } }, "\uC804\uCCB4 \uB370\uC774\uD130 \uBC31\uC5C5 / \uBCF5\uC6D0"), /* @__PURE__ */ React.createElement("div", { style: styles.cardMeta }, "\uC0AC\uC6A9\uC790\xB7\uC81C\uD488\xB7\uBCC0\uACBD\xB7\uBA54\uBAA8\xB7\uACF5\uC9C0\xB7\uBCF4\uAD00\uD568\xB7\uD734\uC9C0\uD1B5\uACFC \uCCA8\uBD80\uD30C\uC77C\uAE4C\uC9C0 JSON \uD30C\uC77C \uD558\uB098\uB85C \uBC31\uC5C5\uD569\uB2C8\uB2E4. \uBE44\uBC00\uBC88\uD638 \uB4F1 \uBBFC\uAC10\uC815\uBCF4\uAC00 \uD3EC\uD568\uB418\uB2C8 \uC548\uC804\uD55C \uACF3\uC5D0 \uBCF4\uAD00\uD558\uC138\uC694. \uBCF5\uC6D0\uD558\uBA74 \uD604\uC7AC \uB370\uC774\uD130\uAC00 \uBC31\uC5C5 \uC2DC\uC810\uC73C\uB85C \uBC14\uB00C\uBA70, \uBCF5\uC6D0 \uC9C1\uC804 \uC0C1\uD0DC\uB294 \uC790\uB3D9\uC73C\uB85C \uD55C \uBC88 \uB354 \uBC31\uC5C5\uB429\uB2C8\uB2E4.")), /* @__PURE__ */ React.createElement("input", { ref: restoreRef, type: "file", accept: ".json,application/json", style: { display: "none" }, onChange: pickRestore }), /* @__PURE__ */ React.createElement("button", { style: styles.ghostBtn, onClick: () => {
+      var _a;
+      return (_a = restoreRef.current) == null ? void 0 : _a.click();
+    } }, "\u2934 \uBC31\uC5C5 \uD30C\uC77C\uB85C \uBCF5\uC6D0"), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: onBackup }, "\u{1F4BE} \uBC31\uC5C5 \uB2E4\uC6B4\uB85C\uB4DC"))), /* @__PURE__ */ React.createElement("div", { style: styles.sectionLabel }, "\uC624\uB798\uB41C \uC644\uB8CC \uBCC0\uACBD \uBCF4\uAD00"), /* @__PURE__ */ React.createElement("div", { style: { ...styles.card, marginBottom: 24 } }, /* @__PURE__ */ React.createElement("div", { style: { padding: "13px 16px", display: "flex", alignItems: "center", gap: 10 } }, /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 14, fontWeight: 600 } }, "\uC644\uB8CC \uD6C4", " ", /* @__PURE__ */ React.createElement("select", { style: styles.dateInput, value: months, onChange: (e) => setMonths(Number(e.target.value)) }, /* @__PURE__ */ React.createElement("option", { value: 6 }, "6\uAC1C\uC6D4"), /* @__PURE__ */ React.createElement("option", { value: 12 }, "12\uAC1C\uC6D4"), /* @__PURE__ */ React.createElement("option", { value: 24 }, "24\uAC1C\uC6D4")), " ", "\uC9C0\uB09C \uBCC0\uACBD\uC744 \uBCF4\uAD00\uD568\uC73C\uB85C \uC774\uB3D9"), /* @__PURE__ */ React.createElement("div", { style: styles.cardMeta }, "\uD604\uC7AC \uC774\uB3D9 \uB300\uC0C1 ", candidateCount, "\uAC74 \xB7 \uC774\uB3D9\uD574\uB3C4 '\uBCF4\uAD00\uD568' \uD0ED\uC5D0\uC11C \uC870\uD68C\xB7\uAC80\uC0C9\xB7\uBCF5\uC6D0\uD560 \uC218 \uC788\uACE0, \uD3C9\uC18C \uD654\uBA74\uC5D0\uC11C\uB294 \uBE60\uC838 \uC18D\uB3C4\uC640 \uC800\uC7A5 \uBD80\uB2F4\uC774 \uC904\uC5B4\uB4ED\uB2C8\uB2E4.")), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, disabled: candidateCount === 0, onClick: () => onArchive(months) }, "\uBCF4\uAD00\uD568\uC73C\uB85C \uC774\uB3D9"))), /* @__PURE__ */ React.createElement("div", { style: styles.sectionLabel }, "\uAC00\uC785 \uC2B9\uC778 \uB300\uAE30 ", /* @__PURE__ */ React.createElement("span", { style: styles.mainCount }, signups.length, "\uAC74")), signups.length === 0 ? /* @__PURE__ */ React.createElement("div", { style: styles.emptyStateSmall }, "\uB300\uAE30 \uC911\uC778 \uAC00\uC785 \uC694\uCCAD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.") : /* @__PURE__ */ React.createElement("div", { style: { ...styles.ledger, marginBottom: 24 } }, signups.map((s) => /* @__PURE__ */ React.createElement("div", { key: s.id, style: styles.card }, /* @__PURE__ */ React.createElement("div", { style: { padding: "13px 16px", display: "flex", alignItems: "center", gap: 12 } }, /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 14, fontWeight: 600 } }, s.name, " (", s.empId, ") ", /* @__PURE__ */ React.createElement("span", { style: styles.progressTag }, teamName(teams, s.team))), /* @__PURE__ */ React.createElement("div", { style: styles.cardMeta }, "\uC2E0\uCCAD\uC77C ", s.requestedAt)), /* @__PURE__ */ React.createElement("button", { style: styles.completeBtn, onClick: () => onApproveSignup(s) }, "\uC2B9\uC778"), /* @__PURE__ */ React.createElement("button", { style: styles.ghostBtn, onClick: () => onRejectSignup(s) }, "\uAC70\uBD80"))))), /* @__PURE__ */ React.createElement("div", { style: styles.sectionLabel }, "\uC81C\uD488 \uCD94\uAC00/\uC0AD\uC81C \uC694\uCCAD ", /* @__PURE__ */ React.createElement("span", { style: styles.mainCount }, requests.length, "\uAC74")), requests.length === 0 ? /* @__PURE__ */ React.createElement("div", { style: styles.emptyStateSmall }, "\uB300\uAE30 \uC911\uC778 \uC694\uCCAD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.") : /* @__PURE__ */ React.createElement("div", { style: styles.ledger }, requests.map((r) => {
       var _a, _b;
       return /* @__PURE__ */ React.createElement("div", { key: r.id, style: styles.card }, /* @__PURE__ */ React.createElement("div", { style: { padding: "13px 16px", display: "flex", alignItems: "center", gap: 12 } }, /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 14, fontWeight: 600 } }, r.type === "add" ? /* @__PURE__ */ React.createElement(React.Fragment, null, "\uC81C\uD488 \uCD94\uAC00 \uC694\uCCAD \u2014 ", r.name, " ", /* @__PURE__ */ React.createElement("span", { style: styles.progressTag }, catName(categories, r.categoryId))) : /* @__PURE__ */ React.createElement(React.Fragment, null, "\uC81C\uD488 \uC0AD\uC81C \uC694\uCCAD \u2014 ", r.productName)), /* @__PURE__ */ React.createElement("div", { style: styles.cardMeta }, "\uC694\uCCAD\uC790 ", (_a = r.requestedBy) == null ? void 0 : _a.name, " (", (_b = r.requestedBy) == null ? void 0 : _b.empId, ") \xB7 ", r.requestedAt)), /* @__PURE__ */ React.createElement("button", { style: styles.completeBtn, onClick: () => onApprove(r) }, "\uC2B9\uC778"), /* @__PURE__ */ React.createElement("button", { style: styles.ghostBtn, onClick: () => onReject(r) }, "\uAC70\uBD80")));
     })));
+  }
+  function NoticesPanel({ notices, isAdmin, onAdd, onUpdate, onDelete, onUploadFile, onDownloadFile }) {
+    const [page, setPage] = useState(1);
+    const [showForm, setShowForm] = useState(false);
+    const [editing, setEditing] = useState(null);
+    const totalPages = Math.max(1, Math.ceil(notices.length / 5));
+    const safePage = Math.min(page, totalPages);
+    const pageItems = notices.slice((safePage - 1) * 5, safePage * 5);
+    return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: styles.mainHeaderRow }, /* @__PURE__ */ React.createElement("h2", { style: styles.mainTitle }, "\uACF5\uC9C0\uC0AC\uD56D"), /* @__PURE__ */ React.createElement("span", { style: styles.mainCount }, notices.length, "\uAC74"), /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }), isAdmin && /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: () => setShowForm(true) }, "+ \uACF5\uC9C0 \uC791\uC131")), notices.length === 0 ? /* @__PURE__ */ React.createElement("div", { style: styles.emptyState }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 15, color: TOKENS.ink2 } }, "\uB4F1\uB85D\uB41C \uACF5\uC9C0\uC0AC\uD56D\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.")) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: styles.ledger }, pageItems.map((n) => /* @__PURE__ */ React.createElement(NoticeCard, { key: n.id, notice: n, isAdmin, onEdit: () => setEditing(n), onDelete, onDownloadFile }))), /* @__PURE__ */ React.createElement(Pager, { page: safePage, totalItems: notices.length, onChange: setPage })), (showForm || editing) && /* @__PURE__ */ React.createElement(
+      NoticeForm,
+      {
+        initial: editing,
+        onCancel: () => {
+          setShowForm(false);
+          setEditing(null);
+        },
+        onUploadFile,
+        onSubmit: async (form) => {
+          const ok = editing ? await onUpdate(editing.id, form) : await onAdd(form);
+          if (ok) {
+            if (!editing) setPage(1);
+            setShowForm(false);
+            setEditing(null);
+          }
+        }
+      }
+    ));
+  }
+  function NoticeCard({ notice, isAdmin, onEdit, onDelete, onDownloadFile }) {
+    var _a;
+    const [open, setOpen] = useState(false);
+    return /* @__PURE__ */ React.createElement("div", { style: styles.card }, /* @__PURE__ */ React.createElement("div", { style: styles.cardTop, onClick: () => setOpen((o) => !o) }, /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", { style: styles.cardTitleRow }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 14.5, fontWeight: 700, color: TOKENS.ink } }, notice.title), notice.attachment && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12, color: TOKENS.ink3 } }, "\u{1F4CE}")), /* @__PURE__ */ React.createElement("div", { style: styles.cardMeta }, notice.createdAt, " \xB7 ", (_a = notice.author) == null ? void 0 : _a.name, notice.updatedAt ? ` \xB7 \uC218\uC815 ${notice.updatedAt}` : "")), /* @__PURE__ */ React.createElement("span", { style: styles.chevronBtn }, open ? "\u25BE" : "\u25B8")), open && /* @__PURE__ */ React.createElement("div", { style: styles.cardBody }, notice.body && /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13.5, color: TOKENS.ink, lineHeight: 1.7, whiteSpace: "pre-wrap" } }, notice.body), notice.attachment && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 10 } }, /* @__PURE__ */ React.createElement("div", { style: styles.fieldLabel }, "\uCCA8\uBD80\uD30C\uC77C"), /* @__PURE__ */ React.createElement("div", { style: styles.attachmentChip, onClick: () => onDownloadFile(notice.attachment) }, "\u{1F4CE} ", notice.attachment.fileName)), isAdmin && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 14, paddingTop: 10, borderTop: `1px solid ${TOKENS.line}`, display: "flex", gap: 6 } }, /* @__PURE__ */ React.createElement("button", { style: styles.chipActionBtn, onClick: onEdit }, "\uC218\uC815"), /* @__PURE__ */ React.createElement("button", { style: styles.chipActionBtn, onClick: () => onDelete(notice) }, "\uC0AD\uC81C"))));
+  }
+  function NoticeForm({ initial, onCancel, onSubmit, onUploadFile }) {
+    var _a, _b, _c;
+    const isEdit = !!initial;
+    const [title, setTitle] = useState((_a = initial == null ? void 0 : initial.title) != null ? _a : "");
+    const [body, setBody] = useState((_b = initial == null ? void 0 : initial.body) != null ? _b : "");
+    const [attachment, setAttachment] = useState((_c = initial == null ? void 0 : initial.attachment) != null ? _c : null);
+    const [uploading, setUploading] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const [error, setError] = useState("");
+    const fileRef = useRef(null);
+    const pickFile = async (e) => {
+      var _a2;
+      const file = (_a2 = e.target.files) == null ? void 0 : _a2[0];
+      e.target.value = "";
+      if (!file) return;
+      setUploading(true);
+      const meta = await onUploadFile(file);
+      setUploading(false);
+      if (meta) setAttachment(meta);
+    };
+    const submit = async () => {
+      if (!title.trim()) return setError("\uC81C\uBAA9\uC744 \uC785\uB825\uD574 \uC8FC\uC138\uC694.");
+      setError("");
+      setSaving(true);
+      await onSubmit({ title, body, attachment });
+      setSaving(false);
+    };
+    return /* @__PURE__ */ React.createElement("div", { style: styles.overlay, onMouseDown: (e) => {
+      if (e.target === e.currentTarget) onCancel();
+    } }, /* @__PURE__ */ React.createElement("div", { style: { ...styles.modal, width: 560 } }, /* @__PURE__ */ React.createElement("div", { style: styles.modalHeader }, /* @__PURE__ */ React.createElement("span", null, isEdit ? "\uACF5\uC9C0\uC0AC\uD56D \uC218\uC815" : "\uACF5\uC9C0\uC0AC\uD56D \uC791\uC131"), /* @__PURE__ */ React.createElement("span", { style: styles.modalClose, onClick: onCancel }, "\xD7")), /* @__PURE__ */ React.createElement("div", { style: styles.modalBody }, /* @__PURE__ */ React.createElement(LabeledInput, { label: "\uC81C\uBAA9", value: title, onChange: setTitle, placeholder: "\uACF5\uC9C0 \uC81C\uBAA9" }), /* @__PURE__ */ React.createElement(LabeledTextarea, { label: "\uB0B4\uC6A9", value: body, onChange: setBody, placeholder: "\uACF5\uC9C0 \uB0B4\uC6A9\uC744 \uC785\uB825\uD558\uC138\uC694" }), /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 6 } }, /* @__PURE__ */ React.createElement("div", { style: styles.fieldLabel }, "\uCCA8\uBD80\uD30C\uC77C"), /* @__PURE__ */ React.createElement("input", { ref: fileRef, type: "file", style: { display: "none" }, onChange: pickFile }), attachment ? /* @__PURE__ */ React.createElement("span", { style: styles.tagChip }, "\u{1F4CE} ", attachment.fileName, " ", /* @__PURE__ */ React.createElement("span", { style: { cursor: "pointer", marginLeft: 4 }, onClick: () => setAttachment(null) }, "\xD7")) : /* @__PURE__ */ React.createElement("button", { style: styles.smallGhostBtn, onClick: () => {
+      var _a2;
+      return (_a2 = fileRef.current) == null ? void 0 : _a2.click();
+    } }, uploading ? "\uC5C5\uB85C\uB4DC \uC911\u2026" : "+ \uD30C\uC77C \uCCA8\uBD80 (700KB \uC774\uD558)")), error && /* @__PURE__ */ React.createElement("div", { style: { color: TOKENS.stamp, fontSize: 12.5, marginTop: 8 } }, error)), /* @__PURE__ */ React.createElement("div", { style: styles.modalFooter }, /* @__PURE__ */ React.createElement("button", { style: styles.ghostBtn, onClick: onCancel }, "\uCDE8\uC18C"), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, disabled: saving || uploading, onClick: submit }, saving ? "\uC800\uC7A5 \uC911\u2026" : isEdit ? "\uC800\uC7A5" : "\uB4F1\uB85D"))));
+  }
+  function ArchivePanel({ archived, isAdmin, onRestore, onDownloadFile }) {
+    const [q, setQ] = useState("");
+    const [page, setPage] = useState(1);
+    if (archived === null) {
+      return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: styles.mainHeaderRow }, /* @__PURE__ */ React.createElement("h2", { style: styles.mainTitle }, "\uBCF4\uAD00\uD568")), /* @__PURE__ */ React.createElement("div", { style: styles.emptyStateSmall }, "\uBD88\uB7EC\uC624\uB294 \uC911\u2026"));
+    }
+    const kw = q.trim().toLowerCase();
+    const has = (v) => String(v || "").toLowerCase().includes(kw);
+    const filtered = kw ? archived.filter((c) => {
+      var _a;
+      return has(c.docNumber) || has(c.changeName) || has(c.historyText) || has(c.noteText) || has((_a = c.registrant) == null ? void 0 : _a.name) || (c.memos || []).some((m) => has(m.text) || has(m.authorName) || (m.replies || []).some((r) => has(r.text) || has(r.authorName)));
+    }) : archived;
+    const totalPages = Math.max(1, Math.ceil(filtered.length / 5));
+    const safePage = Math.min(page, totalPages);
+    return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: styles.mainHeaderRow }, /* @__PURE__ */ React.createElement("h2", { style: styles.mainTitle }, "\uBCF4\uAD00\uD568"), /* @__PURE__ */ React.createElement("span", { style: styles.mainCount }, filtered.length, "\uAC74 \xB7 \uC644\uB8CC \uD6C4 \uC624\uB798\uB41C \uBCC0\uACBD"), /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }), /* @__PURE__ */ React.createElement("input", { style: { ...styles.searchInput, width: 220 }, placeholder: "\uAC80\uC0C9 (\uBB38\uC11C\uBC88\uD638, \uBCC0\uACBD\uBA85, \uB0B4\uC6A9, \uBA54\uBAA8 \uB4F1)", value: q, onChange: (e) => {
+      setQ(e.target.value);
+      setPage(1);
+    } })), filtered.length === 0 ? /* @__PURE__ */ React.createElement("div", { style: styles.emptyState }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 15, color: TOKENS.ink2 } }, kw ? "\uAC80\uC0C9 \uACB0\uACFC\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4." : "\uBCF4\uAD00\uB41C \uBCC0\uACBD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4."), !kw && /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, color: TOKENS.ink3, marginTop: 6 } }, "\uAD00\uB9AC\uC790 \uD0ED\uC758 '\uC624\uB798\uB41C \uC644\uB8CC \uBCC0\uACBD \uBCF4\uAD00'\uC5D0\uC11C \uC774\uB3D9\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.")) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: styles.ledger }, filtered.slice((safePage - 1) * 5, safePage * 5).map((rec) => /* @__PURE__ */ React.createElement(ArchiveCard, { key: rec.id, rec, isAdmin, onRestore, onDownloadFile }))), /* @__PURE__ */ React.createElement(Pager, { page: safePage, totalItems: filtered.length, onChange: setPage })));
+  }
+  function ArchiveCard({ rec, isAdmin, onRestore, onDownloadFile }) {
+    var _a;
+    const [open, setOpen] = useState(false);
+    const rows = (rec.productIds || []).map((id) => {
+      var _a2, _b;
+      return { name: ((_a2 = rec.productNames) == null ? void 0 : _a2[id]) || "(\uC0AD\uC81C\uB41C \uC81C\uD488)", c: (_b = rec.completions) == null ? void 0 : _b[id] };
+    });
+    const dates = rows.map((r) => {
+      var _a2;
+      return (_a2 = r.c) == null ? void 0 : _a2.date;
+    }).filter(Boolean).sort();
+    const lastDate = dates[dates.length - 1];
+    const exportExcel = () => {
+      try {
+        const data = rows.map((r) => {
+          var _a2, _b;
+          return { "\uC81C\uD488\uBA85": r.name, "Rev.No.": ((_a2 = r.c) == null ? void 0 : _a2.revNo) || "", "\uC644\uB8CC\uC77C": ((_b = r.c) == null ? void 0 : _b.date) ? dotFormat(r.c.date) : "" };
+        });
+        const ws = XLSX.utils.json_to_sheet(data);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "\uC644\uB8CC\uD604\uD669");
+        XLSX.writeFile(wb, `${rec.docNumber}_\uC644\uB8CC\uD604\uD669.xlsx`);
+      } catch (e) {
+        alert("\uC5D1\uC140 \uD30C\uC77C \uC0DD\uC131 \uC911 \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4.");
+      }
+    };
+    return /* @__PURE__ */ React.createElement("div", { style: { ...styles.card, ...styles.cardCompleted } }, /* @__PURE__ */ React.createElement("div", { style: styles.cardTop, onClick: () => setOpen((o) => !o) }, /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", { style: styles.cardTitleRow }, /* @__PURE__ */ React.createElement("span", { style: styles.docNumberTitle }, rec.docNumber), rec.changeName && /* @__PURE__ */ React.createElement("span", { style: styles.changeNameText }, rec.changeName)), /* @__PURE__ */ React.createElement("div", { style: styles.cardMeta }, "\uB4F1\uB85D\uC77C ", rec.createdAt, " \xB7 ", (_a = rec.registrant) == null ? void 0 : _a.name, " \xB7 \uAD00\uB828 \uC81C\uD488 ", rows.length, "\uAC74", lastDate && /* @__PURE__ */ React.createElement("span", { style: styles.finalDoneTag }, "\uCD5C\uC885 \uBC18\uC601\uC77C ", dotFormat(lastDate)), /* @__PURE__ */ React.createElement("span", { style: styles.progressTag }, "\uBCF4\uAD00 ", rec.archivedAt))), /* @__PURE__ */ React.createElement("span", { style: styles.chevronBtn }, open ? "\u25BE" : "\u25B8")), open && /* @__PURE__ */ React.createElement("div", { style: styles.cardBody }, /* @__PURE__ */ React.createElement(Field, { label: "\uBCC0\uACBD \uB0B4\uC6A9", value: rec.historyText }), /* @__PURE__ */ React.createElement(Field, { label: "\uD2B9\uC774\uC0AC\uD56D \uAE30\uC7AC\uB780", value: rec.noteText, emphasize: true }), rec.attachment && /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 14 } }, /* @__PURE__ */ React.createElement("div", { style: styles.fieldLabel }, "\uCCA8\uBD80\uD30C\uC77C"), /* @__PURE__ */ React.createElement("div", { style: styles.attachmentChip, onClick: () => onDownloadFile(rec.attachment) }, "\u{1F4CE} ", rec.attachment.fileName)), /* @__PURE__ */ React.createElement("div", { style: styles.fieldLabel }, "\uC81C\uD488\uBCC4 \uBC18\uC601 \uD604\uD669"), rows.length === 0 ? /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12.5, color: TOKENS.ink3 } }, "\uAD00\uB828 \uC81C\uD488\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.") : /* @__PURE__ */ React.createElement("div", { style: styles.productStatusList }, rows.map((r, i) => /* @__PURE__ */ React.createElement("div", { key: i, style: styles.productStatusRow }, /* @__PURE__ */ React.createElement("span", { style: styles.productStatusName }, r.name), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12.5, color: TOKENS.ink2 } }, r.c ? `Rev.${r.c.revNo || "-"} \xB7 ${dotFormat(r.c.date)}` : "\uBBF8\uC644\uB8CC")))), /* @__PURE__ */ React.createElement("div", { style: { ...styles.fieldLabel, marginTop: 14 } }, "\uBA54\uBAA8"), (rec.memos || []).length === 0 ? /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12.5, color: TOKENS.ink3 } }, "\uBA54\uBAA8\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.") : (rec.memos || []).map((m) => /* @__PURE__ */ React.createElement("div", { key: m.id, style: { marginBottom: 8, paddingBottom: 8, borderBottom: `1px solid ${TOKENS.line}` } }, /* @__PURE__ */ React.createElement("div", { style: styles.memoMeta }, m.authorName, " \xB7 ", m.createdAt), /* @__PURE__ */ React.createElement("div", { style: styles.memoText }, m.text), (m.replies || []).map((r) => /* @__PURE__ */ React.createElement("div", { key: r.id, style: { marginLeft: 16, marginTop: 6 } }, /* @__PURE__ */ React.createElement("div", { style: styles.memoMeta }, "\u21B3 ", r.authorName, " \xB7 ", r.createdAt), /* @__PURE__ */ React.createElement("div", { style: styles.memoText }, r.text))))), /* @__PURE__ */ React.createElement("div", { style: { ...styles.cardActionsRow } }, /* @__PURE__ */ React.createElement("button", { style: styles.chipActionBtn, onClick: exportExcel }, "\u{1F4CA} \uC81C\uD488\uBCC4 \uC644\uB8CC \uD604\uD669 \uC5D1\uC140\uB85C \uCD94\uCD9C"), isAdmin && /* @__PURE__ */ React.createElement("button", { style: styles.chipActionBtn, onClick: () => onRestore(rec) }, "\uBCF4\uAD00\uD568\uC5D0\uC11C \uBCF5\uC6D0"))));
+  }
+  function ImportResultModal({ result, onClose }) {
+    var _a;
+    return /* @__PURE__ */ React.createElement("div", { style: styles.overlay, onMouseDown: (e) => {
+      if (e.target === e.currentTarget) onClose();
+    } }, /* @__PURE__ */ React.createElement("div", { style: { ...styles.modal, width: 580 } }, /* @__PURE__ */ React.createElement("div", { style: styles.modalHeader }, /* @__PURE__ */ React.createElement("span", null, "\uBCC0\uACBD \uC77C\uAD04 \uB4F1\uB85D \uACB0\uACFC"), /* @__PURE__ */ React.createElement("span", { style: styles.modalClose, onClick: onClose }, "\xD7")), /* @__PURE__ */ React.createElement("div", { style: styles.modalBody }, result.error ? /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13.5, lineHeight: 1.7, whiteSpace: "pre-line", color: TOKENS.ink } }, result.error) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 14, marginBottom: 12 } }, "\uB4F1\uB85D ", /* @__PURE__ */ React.createElement("strong", null, result.added, "\uAC74"), " \xB7 \uAC74\uB108\uB700 ", /* @__PURE__ */ React.createElement("strong", null, result.skipped.length, "\uAC74")), ((_a = result.addedRows) == null ? void 0 : _a.length) > 0 && /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 14 } }, /* @__PURE__ */ React.createElement("div", { style: styles.fieldLabel }, "\uB4F1\uB85D\uB41C \uBCC0\uACBD (\uC5F0\uACB0\uB41C \uC81C\uD488 \uC218)"), /* @__PURE__ */ React.createElement("div", { style: { border: `1px solid ${TOKENS.line}`, borderRadius: 6, maxHeight: 170, overflowY: "auto" } }, result.addedRows.map((r, i) => /* @__PURE__ */ React.createElement("div", { key: i, style: { display: "flex", gap: 10, padding: "6px 10px", fontSize: 12.5, borderTop: i === 0 ? "none" : `1px solid ${TOKENS.line}` } }, /* @__PURE__ */ React.createElement("span", { style: { fontFamily: MONO, flex: 1 } }, r.docNumber), /* @__PURE__ */ React.createElement("span", { style: { color: r.productCount === 0 ? TOKENS.ink3 : TOKENS.navy } }, r.productCount === 0 ? "\uC81C\uD488 \uBBF8\uC9C0\uC815" : `\uC81C\uD488 ${r.productCount}\uAC1C`))))), result.skipped.length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: styles.fieldLabel }, "\uAC74\uB108\uB6F4 \uD589"), /* @__PURE__ */ React.createElement("div", { style: { border: `1px solid ${TOKENS.line}`, borderRadius: 6, overflow: "hidden" } }, result.skipped.map((s, i) => /* @__PURE__ */ React.createElement("div", { key: i, style: { display: "flex", gap: 10, padding: "7px 10px", fontSize: 12.5, borderTop: i === 0 ? "none" : `1px solid ${TOKENS.line}`, background: i % 2 ? "#FAF8F1" : "transparent" } }, /* @__PURE__ */ React.createElement("span", { style: { color: TOKENS.ink3, whiteSpace: "nowrap" } }, s.rowNo, "\uD589"), /* @__PURE__ */ React.createElement("span", { style: { fontFamily: MONO, whiteSpace: "nowrap" } }, s.docNumber), /* @__PURE__ */ React.createElement("span", { style: { color: TOKENS.stamp } }, s.reason))))))), /* @__PURE__ */ React.createElement("div", { style: styles.modalFooter }, /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: onClose }, "\uD655\uC778"))));
   }
   function daysLeft(deletedAt) {
     const elapsedMs = Date.now() - new Date(deletedAt).getTime();
@@ -2211,7 +2963,7 @@
     return /* @__PURE__ */ React.createElement("div", { ref: cardRef, style: { ...styles.card, ...viewDone ? styles.cardCompleted : {}, ...isFocusTarget ? styles.cardFocusHighlight : {} } }, /* @__PURE__ */ React.createElement("div", { style: styles.cardTop, onClick: () => {
       setOpen(!open);
       if (isFocusTarget) onClearFocus();
-    } }, /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", { style: styles.cardTitleRow }, /* @__PURE__ */ React.createElement("span", { style: { ...styles.docNumberTitle, ...overdue ? styles.docNumberOverdue : {} } }, change.docNumber), change.changeName && /* @__PURE__ */ React.createElement("span", { style: styles.changeNameText }, change.changeName)), /* @__PURE__ */ React.createElement("div", { style: styles.cardMeta }, "\uB4F1\uB85D\uC77C ", change.createdAt, " \xB7 ", (_a = change.registrant) == null ? void 0 : _a.name, " (", teamName(teams, (_b = change.registrant) == null ? void 0 : _b.team), ") \xB7 \uAD00\uB828 \uC81C\uD488 ", total, "\uAC74", change.dueDate && /* @__PURE__ */ React.createElement("span", { style: overdue ? styles.overdueTag : styles.progressTag }, "\uC644\uB8CC\uC608\uC815\uC77C ", dotFormat(change.dueDate), overdue ? " (\uC9C0\uB0A8)" : ""), isProductView ? focusCompletion ? /* @__PURE__ */ React.createElement("span", { style: styles.finalDoneTag }, "\uC774 \uC81C\uD488 \uC644\uB8CC \xB7 ", dotFormat(focusCompletion.date)) : /* @__PURE__ */ React.createElement("span", { style: styles.progressTag }, "\uC9C4\uD589\uC911") : allDone ? /* @__PURE__ */ React.createElement("span", { style: styles.finalDoneTag }, "\uCD5C\uC885 \uBC18\uC601\uC77C ", dotFormat(lastDate)) : /* @__PURE__ */ React.createElement("span", { style: styles.progressTag }, doneCount, "/", total, " \uC644\uB8CC"))), !showAllProducts && focusProductId && /* @__PURE__ */ React.createElement("div", { onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement(CompletionControl, { resolved: change.completions[focusProductId], onComplete: (date, revNo) => onSetCompletion(change.id, focusProductId, { date, revNo }), onRevert: () => onSetCompletion(change.id, focusProductId, null), compact: true })), /* @__PURE__ */ React.createElement("span", { style: { ...styles.chevron, transform: open ? "rotate(90deg)" : "none" } }, "\u203A")), open && /* @__PURE__ */ React.createElement("div", { style: styles.cardBody }, /* @__PURE__ */ React.createElement(Field, { label: "\uBCC0\uACBD \uB0B4\uC6A9", value: change.historyText }), /* @__PURE__ */ React.createElement(Field, { label: "\uD2B9\uC774\uC0AC\uD56D \uAE30\uC7AC\uB780", value: change.noteText, emphasize: true }), change.attachment && /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 14 } }, /* @__PURE__ */ React.createElement("div", { style: styles.fieldLabel }, "\uCCA8\uBD80\uD30C\uC77C"), /* @__PURE__ */ React.createElement("div", { style: styles.attachmentChip, onClick: () => onDownloadFile(change.attachment) }, "\u{1F4CE} ", change.attachment.fileName)), showAllProducts ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: styles.fieldLabel }, "\uC81C\uD488\uBCC4 \uBC18\uC601 \uD604\uD669 (\uC81C\uD615\uBA85 \uD074\uB9AD \uC2DC \uD558\uC704 \uC81C\uD488 \uD45C\uC2DC)"), /* @__PURE__ */ React.createElement("div", { style: styles.productStatusList }, Object.entries(
+    } }, /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", { style: styles.cardTitleRow }, /* @__PURE__ */ React.createElement("span", { style: { ...styles.docNumberTitle, ...overdue ? styles.docNumberOverdue : {} } }, change.docNumber), change.changeName && /* @__PURE__ */ React.createElement("span", { style: styles.changeNameText }, change.changeName)), /* @__PURE__ */ React.createElement("div", { style: styles.cardMeta }, "\uB4F1\uB85D\uC77C ", change.createdAt, " \xB7 ", (_a = change.registrant) == null ? void 0 : _a.name, " (", teamName(teams, (_b = change.registrant) == null ? void 0 : _b.team), ") \xB7 \uAD00\uB828 \uC81C\uD488 ", total, "\uAC74", change.dueDate && /* @__PURE__ */ React.createElement("span", { style: overdue ? styles.overdueTag : styles.progressTag }, "\uC644\uB8CC\uC608\uC815\uC77C ", dotFormat(change.dueDate), overdue ? " (\uC9C0\uB0A8)" : ""), isProductView ? focusCompletion ? /* @__PURE__ */ React.createElement("span", { style: styles.finalDoneTag }, "\uC774 \uC81C\uD488 \uC644\uB8CC \xB7 ", dotFormat(focusCompletion.date)) : /* @__PURE__ */ React.createElement("span", { style: styles.progressTag }, "\uC9C4\uD589\uC911") : allDone ? /* @__PURE__ */ React.createElement("span", { style: styles.finalDoneTag }, "\uCD5C\uC885 \uBC18\uC601\uC77C ", dotFormat(lastDate)) : /* @__PURE__ */ React.createElement("span", { style: styles.progressTag }, total === 0 ? "\uC81C\uD488 \uBBF8\uC9C0\uC815" : `${doneCount}/${total} \uC644\uB8CC`))), !showAllProducts && focusProductId && /* @__PURE__ */ React.createElement("div", { onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement(CompletionControl, { resolved: change.completions[focusProductId], onComplete: (date, revNo) => onSetCompletion(change.id, focusProductId, { date, revNo }), onRevert: () => onSetCompletion(change.id, focusProductId, null), compact: true })), /* @__PURE__ */ React.createElement("span", { style: { ...styles.chevron, transform: open ? "rotate(90deg)" : "none" } }, "\u203A")), open && /* @__PURE__ */ React.createElement("div", { style: styles.cardBody }, /* @__PURE__ */ React.createElement(Field, { label: "\uBCC0\uACBD \uB0B4\uC6A9", value: change.historyText }), /* @__PURE__ */ React.createElement(Field, { label: "\uD2B9\uC774\uC0AC\uD56D \uAE30\uC7AC\uB780", value: change.noteText, emphasize: true }), change.attachment && /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 14 } }, /* @__PURE__ */ React.createElement("div", { style: styles.fieldLabel }, "\uCCA8\uBD80\uD30C\uC77C"), /* @__PURE__ */ React.createElement("div", { style: styles.attachmentChip, onClick: () => onDownloadFile(change.attachment) }, "\u{1F4CE} ", change.attachment.fileName)), showAllProducts ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: styles.fieldLabel }, "\uC81C\uD488\uBCC4 \uBC18\uC601 \uD604\uD669 (\uC81C\uD615\uBA85 \uD074\uB9AD \uC2DC \uD558\uC704 \uC81C\uD488 \uD45C\uC2DC)"), /* @__PURE__ */ React.createElement("div", { style: styles.productStatusList }, Object.entries(
       relatedProducts.reduce((acc, p) => {
         const key = p.categoryId || "__none";
         (acc[key] = acc[key] || []).push(p);
@@ -2222,7 +2974,7 @@
       const expanded = !!expandedStatusCats[catId];
       const doneInCat = prods.filter((p) => change.completions[p.id]).length;
       return /* @__PURE__ */ React.createElement("div", { key: catId }, /* @__PURE__ */ React.createElement("div", { style: styles.categoryStatusHeader, onClick: () => setExpandedStatusCats((s) => ({ ...s, [catId]: !s[catId] })) }, /* @__PURE__ */ React.createElement("span", { style: styles.chevronBtn }, expanded ? "\u25BE" : "\u25B8"), /* @__PURE__ */ React.createElement("span", { style: { flex: 1 } }, cat ? cat.name : "\uAE30\uD0C0"), /* @__PURE__ */ React.createElement("span", { style: styles.progressTag }, doneInCat, "/", prods.length)), expanded && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 4, marginBottom: 4 } }, prods.map((p) => /* @__PURE__ */ React.createElement("div", { key: p.id, style: styles.productStatusRow }, /* @__PURE__ */ React.createElement("span", { style: styles.productStatusName }, p.name), /* @__PURE__ */ React.createElement(CompletionControl, { resolved: change.completions[p.id], onComplete: (date, revNo) => onSetCompletion(change.id, p.id, { date, revNo }), onRevert: () => onSetCompletion(change.id, p.id, null) })))));
-    }), relatedProducts.length === 0 && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12.5, color: TOKENS.ink3 } }, "\uC0AD\uC81C\uB41C \uC81C\uD488\uB9CC \uC5F0\uACB0\uB418\uC5B4 \uC788\uC2B5\uB2C8\uB2E4"))) : /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, color: TOKENS.ink3, marginTop: 12 } }, "\uC774 \uD654\uBA74\uC740 \uC120\uD0DD\uD55C \uC81C\uD488\uC758 \uBC18\uC601 \uD604\uD669\uB9CC \uD45C\uC2DC\uD569\uB2C8\uB2E4. \uC804\uCCB4 \uC81C\uD488 \uD604\uD669\uC740 '\uC804\uCCB4 \uBCC0\uACBD \uC774\uB825'\uC5D0\uC11C \uD655\uC778\uD558\uC138\uC694."), onViewInAllTab && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 12 } }, /* @__PURE__ */ React.createElement("button", { style: styles.chipActionBtn, onClick: (e) => {
+    }), relatedProducts.length === 0 && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12.5, color: TOKENS.ink3 } }, change.productIds.length === 0 ? "\uAD00\uB828 \uC81C\uD488\uC774 \uC9C0\uC815\uB418\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4. (\uC218\uC815 \uBC84\uD2BC\uC73C\uB85C \uC81C\uD488\uC744 \uCD94\uAC00\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4)" : "\uC0AD\uC81C\uB41C \uC81C\uD488\uB9CC \uC5F0\uACB0\uB418\uC5B4 \uC788\uC2B5\uB2C8\uB2E4"))) : /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, color: TOKENS.ink3, marginTop: 12 } }, "\uC774 \uD654\uBA74\uC740 \uC120\uD0DD\uD55C \uC81C\uD488\uC758 \uBC18\uC601 \uD604\uD669\uB9CC \uD45C\uC2DC\uD569\uB2C8\uB2E4. \uC804\uCCB4 \uC81C\uD488 \uD604\uD669\uC740 '\uC804\uCCB4 \uBCC0\uACBD \uC774\uB825'\uC5D0\uC11C \uD655\uC778\uD558\uC138\uC694."), onViewInAllTab && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 12 } }, /* @__PURE__ */ React.createElement("button", { style: styles.chipActionBtn, onClick: (e) => {
       e.stopPropagation();
       onViewInAllTab();
     } }, "\uC804\uCCB4 \uBCC0\uACBD \uC774\uB825\uC5D0\uC11C \uBCF4\uAE30")), showExportButton && allDone && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 8 } }, /* @__PURE__ */ React.createElement("button", { style: styles.chipActionBtn, onClick: (e) => {
@@ -2304,7 +3056,6 @@
     };
     const submit = () => {
       if (!docNumber.trim()) return setError("\uBCC0\uACBD\uBB38\uC11C\uBC88\uD638\uB97C \uC785\uB825\uD574 \uC8FC\uC138\uC694.");
-      if (productIds.length === 0) return setError("\uAD00\uB828 \uC81C\uD488\uC744 \uD558\uB098 \uC774\uC0C1 \uC120\uD0DD\uD574 \uC8FC\uC138\uC694.");
       if (dueDate && dueDate.length !== 10) return setError("\uC644\uB8CC\uC608\uC815\uC77C\uC744 8\uC790\uB9AC \uC22B\uC790\uB85C \uBAA8\uB450 \uC785\uB825\uD574 \uC8FC\uC138\uC694. (\uC608: 20260115)");
       setError("");
       onSubmit({ docNumber, changeName, historyText, noteText, dueDate, productIds, attachment });
@@ -2329,7 +3080,7 @@
     )), /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 14 } }, /* @__PURE__ */ React.createElement("div", { style: styles.fieldLabel }, "\uCCA8\uBD80\uD30C\uC77C"), /* @__PURE__ */ React.createElement("input", { ref: fileInputRef, type: "file", accept: ".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.hwp,.hwpx,.png,.jpg,.jpeg,.gif,.webp", style: { display: "none" }, onChange: handleFilePick }), attachment ? /* @__PURE__ */ React.createElement("span", { style: styles.tagChip }, "\u{1F4CE} ", attachment.fileName, " ", /* @__PURE__ */ React.createElement("span", { style: { cursor: "pointer", marginLeft: 4 }, onClick: () => setAttachment(null) }, "\xD7")) : /* @__PURE__ */ React.createElement("span", { style: styles.tinyLink, onClick: () => {
       var _a2;
       return (_a2 = fileInputRef.current) == null ? void 0 : _a2.click();
-    } }, uploading ? "\uC5C5\uB85C\uB4DC \uC911\u2026" : "+ \uD30C\uC77C \uCCA8\uBD80")), /* @__PURE__ */ React.createElement("div", { style: styles.fieldLabel }, "\uAD00\uB828 \uC81C\uD488 \uC120\uD0DD ", productIds.length > 0 && /* @__PURE__ */ React.createElement("span", { style: { color: TOKENS.navy } }, "(", productIds.length, "\uAC1C \uC120\uD0DD\uB428)")), products.length === 0 ? /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, color: TOKENS.ink3, marginBottom: 4 } }, "\uB4F1\uB85D\uB41C \uC81C\uD488\uC774 \uC5C6\uC2B5\uB2C8\uB2E4. \uC0AC\uC774\uB4DC\uBC14\uC5D0\uC11C \uBA3C\uC800 \uC81C\uD488\uC744 \uCD94\uAC00\uD574 \uC8FC\uC138\uC694.") : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("input", { style: { ...styles.input, marginBottom: 10 }, placeholder: "\uC81C\uD488\uBA85\uC73C\uB85C \uAC80\uC0C9\uD574\uC11C \uCD94\uAC00", value: productSearch, onChange: (e) => setProductSearch(e.target.value) }), productSearch.trim() ? /* @__PURE__ */ React.createElement("div", { style: styles.productPickWrap }, searchResults.length === 0 ? /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12.5, color: TOKENS.ink3 } }, "\uAC80\uC0C9 \uACB0\uACFC\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.") : searchResults.map((p) => {
+    } }, uploading ? "\uC5C5\uB85C\uB4DC \uC911\u2026" : "+ \uD30C\uC77C \uCCA8\uBD80")), /* @__PURE__ */ React.createElement("div", { style: styles.fieldLabel }, "\uAD00\uB828 \uC81C\uD488 \uC120\uD0DD (\uC120\uD0DD\uC0AC\uD56D) ", productIds.length > 0 && /* @__PURE__ */ React.createElement("span", { style: { color: TOKENS.navy } }, "(", productIds.length, "\uAC1C \uC120\uD0DD\uB428)")), products.length === 0 ? /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, color: TOKENS.ink3, marginBottom: 4 } }, "\uB4F1\uB85D\uB41C \uC81C\uD488\uC774 \uC5C6\uC2B5\uB2C8\uB2E4. \uC0AC\uC774\uB4DC\uBC14\uC5D0\uC11C \uBA3C\uC800 \uC81C\uD488\uC744 \uCD94\uAC00\uD574 \uC8FC\uC138\uC694.") : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("input", { style: { ...styles.input, marginBottom: 10 }, placeholder: "\uC81C\uD488\uBA85\uC73C\uB85C \uAC80\uC0C9\uD574\uC11C \uCD94\uAC00", value: productSearch, onChange: (e) => setProductSearch(e.target.value) }), productSearch.trim() ? /* @__PURE__ */ React.createElement("div", { style: styles.productPickWrap }, searchResults.length === 0 ? /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12.5, color: TOKENS.ink3 } }, "\uAC80\uC0C9 \uACB0\uACFC\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.") : searchResults.map((p) => {
       const active = productIds.includes(p.id);
       const cat = categories.find((c) => c.id === p.categoryId);
       return /* @__PURE__ */ React.createElement("button", { key: p.id, onClick: () => toggleProduct(p.id), style: { ...styles.pickChip, ...active ? styles.pickChipActive : {} } }, active ? "\u2713 " : "", p.name, " ", /* @__PURE__ */ React.createElement("span", { style: { opacity: 0.7, fontSize: 11 } }, "(", cat == null ? void 0 : cat.name, ")"));
