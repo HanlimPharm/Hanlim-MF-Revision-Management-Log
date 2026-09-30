@@ -317,6 +317,7 @@
     const [archived, setArchived] = useState(null);
     const savedSnapRef = useRef({ change: /* @__PURE__ */ new Map(), alarm: /* @__PURE__ */ new Map(), trash: /* @__PURE__ */ new Map() });
     const [importResult, setImportResult] = useState(null);
+    const [pendingImport, setPendingImport] = useState(null);
     const [importingChanges, setImportingChanges] = useState(false);
     const changeImportRef = useRef(null);
     const [products, setProducts] = useState([]);
@@ -1527,6 +1528,7 @@
         });
         const resolveProducts = (names) => {
           const ids = [];
+          const ambiguous = [];
           const missing = [];
           const add = (id) => {
             if (!ids.includes(id)) ids.push(id);
@@ -1534,10 +1536,6 @@
           names.forEach((n) => {
             const k = normHeader(n);
             let matched = false;
-            (productsByName.get(k) || []).forEach((p) => {
-              matched = true;
-              add(p.id);
-            });
             subcategories.filter((s) => normHeader(s.name) === k).forEach((s) => {
               matched = true;
               products.filter((p) => p.subcategoryId === s.id).forEach((p) => add(p.id));
@@ -1546,13 +1544,29 @@
               matched = true;
               products.filter((p) => p.categoryId === c.id).forEach((p) => add(p.id));
             });
-            if (!matched) missing.push(n);
+            if (matched) return;
+            const exact = productsByName.get(k) || [];
+            if (exact.length > 0) {
+              exact.forEach((p) => add(p.id));
+              return;
+            }
+            const partial = k ? products.filter((p) => normHeader(p.name).includes(k)) : [];
+            if (partial.length === 1) {
+              add(partial[0].id);
+              return;
+            }
+            if (partial.length > 1) {
+              ambiguous.push({ name: n, candidates: partial.map((p) => ({ id: p.id, name: p.name })) });
+              return;
+            }
+            missing.push(n);
           });
-          return { ids, missing };
+          return { ids, ambiguous, missing };
         };
         const existingDocs = new Set(changes.map((c) => c.docNumber.trim().toLowerCase()));
         const skipped = [];
         const records = [];
+        const pendingRows = [];
         for (let r = found.headerRow + 1; r < found.rows.length; r++) {
           const row = found.rows[r];
           if (!row.some((cell) => String(cell).trim() !== "")) continue;
@@ -1569,7 +1583,7 @@
             continue;
           }
           const names = String(get("products")).split(/[,，、;；\n]+/).map((s) => s.trim()).filter(Boolean);
-          const { ids: productIds, missing } = resolveProducts(names);
+          const { ids: productIds, ambiguous, missing } = resolveProducts(names);
           if (missing.length > 0) {
             skipped.push({ rowNo, docNumber, reason: `\uB4F1\uB85D\uB418\uC9C0 \uC54A\uC740 \uC81C\uD488/\uC81C\uD615/\uBB38\uC11C\uD568: ${missing.join(", ")}` });
             continue;
@@ -1579,29 +1593,40 @@
             skipped.push({ rowNo, docNumber, reason: "\uC644\uB8CC\uC608\uC815\uC77C \uD615\uC2DD \uC624\uB958 (\uC608: 20260131)" });
             continue;
           }
-          records.push({
-            id: uid(),
+          const base = {
             docNumber,
             changeName: String(get("changeName")).trim(),
             historyText: String(get("historyText")).trim(),
             noteText: String(get("noteText")).trim(),
-            productIds,
-            attachment: null,
-            dueDate: due.value || null,
-            createdAt: dotFormat(isoToday()),
-            completions: {},
-            memos: [],
-            registrant: { empId: me.empId, name: me.name, team: me.team }
-          });
+            dueDate: due.value || null
+          };
           existingDocs.add(docKey);
+          if (ambiguous.length > 0) {
+            pendingRows.push({ rowNo, ...base, certainIds: productIds, ambiguous });
+          } else {
+            records.push({
+              id: uid(),
+              ...base,
+              productIds,
+              attachment: null,
+              createdAt: dotFormat(isoToday()),
+              completions: {},
+              memos: [],
+              registrant: { empId: me.empId, name: me.name, team: me.team }
+            });
+          }
+        }
+        if (pendingRows.length > 0) {
+          setPendingImport({ records, skipped, pendingRows });
+          return;
         }
         if (records.length === 0) {
           setImportResult({ added: 0, skipped, addedRows: [] });
           return;
         }
-        const base = Date.now();
+        const base2 = Date.now();
         records.forEach((rec, i) => {
-          rec.createdTs = base + (records.length - i);
+          rec.createdTs = base2 + (records.length - i);
         });
         const nextChanges = [...records, ...changes];
         setChanges(nextChanges);
@@ -1626,6 +1651,50 @@
       const f = (_a = e.target.files) == null ? void 0 : _a[0];
       e.target.value = "";
       if (f) await importChangesFromExcel(f);
+    };
+    const finalizeImportWithResolution = async (selections) => {
+      if (!pendingImport) return;
+      const resolvedRecords = pendingImport.pendingRows.map((row) => {
+        const extraIds = row.ambiguous.flatMap((a) => selections[`${row.rowNo}::${a.name}`] || []);
+        const productIds = Array.from(/* @__PURE__ */ new Set([...row.certainIds, ...extraIds]));
+        return {
+          id: uid(),
+          docNumber: row.docNumber,
+          changeName: row.changeName,
+          historyText: row.historyText,
+          noteText: row.noteText,
+          productIds,
+          attachment: null,
+          dueDate: row.dueDate,
+          createdAt: dotFormat(isoToday()),
+          completions: {},
+          memos: [],
+          registrant: { empId: me.empId, name: me.name, team: me.team }
+        };
+      });
+      const records = [...pendingImport.records, ...resolvedRecords];
+      const skipped = pendingImport.skipped;
+      setPendingImport(null);
+      if (records.length === 0) {
+        setImportResult({ added: 0, skipped, addedRows: [] });
+        return;
+      }
+      const base = Date.now();
+      records.forEach((rec, i) => {
+        rec.createdTs = base + (records.length - i);
+      });
+      const nextChanges = [...records, ...changes];
+      setChanges(nextChanges);
+      const ok = await persist({ changes: nextChanges });
+      if (!ok) {
+        setImportResult({ error: "\uC800\uC7A5 \uC911 \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4. \uC7A0\uC2DC \uD6C4 \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694." });
+        return;
+      }
+      setImportResult({
+        added: records.length,
+        skipped,
+        addedRows: records.map((rec) => ({ docNumber: rec.docNumber, productCount: rec.productIds.length }))
+      });
     };
     const resolveMentionRecipients = (taggedEmpIds, taggedTeamIds) => {
       const set = new Set((taggedEmpIds || []).filter((id) => id !== me.empId));
@@ -2065,7 +2134,7 @@
         onRenameCustomTab: renameCustomTab,
         onDeleteCustomTab: deleteCustomTab
       }
-    ), importResult && /* @__PURE__ */ React.createElement(ImportResultModal, { result: importResult, onClose: () => setImportResult(null) }), confirmState && /* @__PURE__ */ React.createElement(ConfirmModal, { message: confirmState.message, onYes: () => resolveConfirm(true), onNo: () => resolveConfirm(false) }), toast && /* @__PURE__ */ React.createElement("div", { style: styles.toast }, toast), saving && /* @__PURE__ */ React.createElement("div", { style: styles.savingDot, title: "\uC800\uC7A5 \uC911" }));
+    ), pendingImport && /* @__PURE__ */ React.createElement(ImportResolveModal, { pendingImport, onCancel: () => setPendingImport(null), onConfirm: finalizeImportWithResolution }), importResult && /* @__PURE__ */ React.createElement(ImportResultModal, { result: importResult, onClose: () => setImportResult(null) }), confirmState && /* @__PURE__ */ React.createElement(ConfirmModal, { message: confirmState.message, onYes: () => resolveConfirm(true), onNo: () => resolveConfirm(false) }), toast && /* @__PURE__ */ React.createElement("div", { style: styles.toast }, toast), saving && /* @__PURE__ */ React.createElement("div", { style: styles.savingDot, title: "\uC800\uC7A5 \uC911" }));
   }
   function MoveProductControl({ product, categories, subcategories, onMove }) {
     const [open, setOpen] = useState(false);
@@ -2620,6 +2689,24 @@
       }
     };
     return /* @__PURE__ */ React.createElement("div", { style: { ...styles.card, ...styles.cardCompleted } }, /* @__PURE__ */ React.createElement("div", { style: styles.cardTop, onClick: () => setOpen((o) => !o) }, /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", { style: styles.cardTitleRow }, /* @__PURE__ */ React.createElement("span", { style: styles.docNumberTitle }, rec.docNumber), rec.changeName && /* @__PURE__ */ React.createElement("span", { style: styles.changeNameText }, rec.changeName)), /* @__PURE__ */ React.createElement("div", { style: styles.cardMeta }, "\uB4F1\uB85D\uC77C ", rec.createdAt, " \xB7 ", (_a = rec.registrant) == null ? void 0 : _a.name, " \xB7 \uAD00\uB828 \uC81C\uD488 ", rows.length, "\uAC74", lastDate && /* @__PURE__ */ React.createElement("span", { style: styles.finalDoneTag }, "\uCD5C\uC885 \uBC18\uC601\uC77C ", dotFormat(lastDate)), /* @__PURE__ */ React.createElement("span", { style: styles.progressTag }, "\uBCF4\uAD00 ", rec.archivedAt))), /* @__PURE__ */ React.createElement("span", { style: styles.chevronBtn }, open ? "\u25BE" : "\u25B8")), open && /* @__PURE__ */ React.createElement("div", { style: styles.cardBody }, /* @__PURE__ */ React.createElement(Field, { label: "\uBCC0\uACBD \uB0B4\uC6A9", value: rec.historyText }), /* @__PURE__ */ React.createElement(Field, { label: "\uD2B9\uC774\uC0AC\uD56D \uAE30\uC7AC\uB780", value: rec.noteText, emphasize: true }), rec.attachment && /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 14 } }, /* @__PURE__ */ React.createElement("div", { style: styles.fieldLabel }, "\uCCA8\uBD80\uD30C\uC77C"), /* @__PURE__ */ React.createElement("div", { style: styles.attachmentChip, onClick: () => onDownloadFile(rec.attachment) }, "\u{1F4CE} ", rec.attachment.fileName)), /* @__PURE__ */ React.createElement("div", { style: styles.fieldLabel }, "\uC81C\uD488\uBCC4 \uBC18\uC601 \uD604\uD669"), rows.length === 0 ? /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12.5, color: TOKENS.ink3 } }, "\uAD00\uB828 \uC81C\uD488\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.") : /* @__PURE__ */ React.createElement("div", { style: styles.productStatusList }, rows.map((r, i) => /* @__PURE__ */ React.createElement("div", { key: i, style: styles.productStatusRow }, /* @__PURE__ */ React.createElement("span", { style: styles.productStatusName }, r.name), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12.5, color: TOKENS.ink2 } }, r.c ? `Rev.${r.c.revNo || "-"} \xB7 ${dotFormat(r.c.date)}` : "\uBBF8\uC644\uB8CC")))), /* @__PURE__ */ React.createElement("div", { style: { ...styles.fieldLabel, marginTop: 14 } }, "\uBA54\uBAA8"), (rec.memos || []).length === 0 ? /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12.5, color: TOKENS.ink3 } }, "\uBA54\uBAA8\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.") : (rec.memos || []).map((m) => /* @__PURE__ */ React.createElement("div", { key: m.id, style: { marginBottom: 8, paddingBottom: 8, borderBottom: `1px solid ${TOKENS.line}` } }, /* @__PURE__ */ React.createElement("div", { style: styles.memoMeta }, m.authorName, " \xB7 ", m.createdAt), /* @__PURE__ */ React.createElement("div", { style: styles.memoText }, m.text), (m.replies || []).map((r) => /* @__PURE__ */ React.createElement("div", { key: r.id, style: { marginLeft: 16, marginTop: 6 } }, /* @__PURE__ */ React.createElement("div", { style: styles.memoMeta }, "\u21B3 ", r.authorName, " \xB7 ", r.createdAt), /* @__PURE__ */ React.createElement("div", { style: styles.memoText }, r.text))))), /* @__PURE__ */ React.createElement("div", { style: { ...styles.cardActionsRow } }, /* @__PURE__ */ React.createElement("button", { style: styles.chipActionBtn, onClick: exportExcel }, "\u{1F4CA} \uC81C\uD488\uBCC4 \uC644\uB8CC \uD604\uD669 \uC5D1\uC140\uB85C \uCD94\uCD9C"), isAdmin && /* @__PURE__ */ React.createElement("button", { style: styles.chipActionBtn, onClick: () => onRestore(rec) }, "\uBCF4\uAD00\uD568\uC5D0\uC11C \uBCF5\uC6D0"))));
+  }
+  function ImportResolveModal({ pendingImport, onCancel, onConfirm }) {
+    const [selections, setSelections] = useState({});
+    const toggle = (key, productId) => {
+      setSelections((prev) => {
+        const cur = prev[key] || [];
+        const next = cur.includes(productId) ? cur.filter((id) => id !== productId) : [...cur, productId];
+        return { ...prev, [key]: next };
+      });
+    };
+    const totalAmbiguous = pendingImport.pendingRows.reduce((sum, r) => sum + r.ambiguous.length, 0);
+    return /* @__PURE__ */ React.createElement("div", { style: styles.overlay, onMouseDown: (e) => {
+      if (e.target === e.currentTarget) onCancel();
+    } }, /* @__PURE__ */ React.createElement("div", { style: { ...styles.modal, width: 620, maxHeight: "85vh", display: "flex", flexDirection: "column" } }, /* @__PURE__ */ React.createElement("div", { style: styles.modalHeader }, /* @__PURE__ */ React.createElement("span", null, "\uC81C\uD488\uBA85 \uD655\uC778 \uD544\uC694 (", totalAmbiguous, "\uAC74)"), /* @__PURE__ */ React.createElement("span", { style: styles.modalClose, onClick: onCancel }, "\xD7")), /* @__PURE__ */ React.createElement("div", { style: { ...styles.modalBody, overflowY: "auto" } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12.5, color: TOKENS.ink3, marginBottom: 14, lineHeight: 1.6 } }, "\uC785\uB825\uD558\uC2E0 \uAE00\uC790\uAC00 \uC5EC\uB7EC \uC81C\uD488\uBA85\uC5D0 \uD3EC\uD568\uB418\uC5B4 \uC788\uC5B4 \uC5B4\uB5A4 \uC81C\uD488\uC778\uC9C0 \uC9C1\uC811 \uACE8\uB77C\uC8FC\uC138\uC694. \uC544\uBB34\uAC83\uB3C4 \uC120\uD0DD\uD558\uC9C0 \uC54A\uC73C\uBA74 \uD574\uB2F9 \uC774\uB984\uC740 \uC81C\uD488 \uC5C6\uC774 \uB4F1\uB85D\uB429\uB2C8\uB2E4."), pendingImport.pendingRows.map((row) => /* @__PURE__ */ React.createElement("div", { key: row.rowNo, style: { border: `1px solid ${TOKENS.line}`, borderRadius: 6, padding: "10px 12px", marginBottom: 12 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, fontWeight: 600, marginBottom: 8 } }, row.rowNo, "\uD589 \xB7 ", /* @__PURE__ */ React.createElement("span", { style: { fontFamily: MONO } }, row.docNumber), row.changeName ? ` \u2014 ${row.changeName}` : ""), row.ambiguous.map((a) => {
+      const key = `${row.rowNo}::${a.name}`;
+      const picked = selections[key] || [];
+      return /* @__PURE__ */ React.createElement("div", { key, style: { marginBottom: 8 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12.5, color: TOKENS.ink2, marginBottom: 4 } }, '"', a.name, '"\uACFC \uC77C\uCE58\uD558\uB294 \uC81C\uD488 ', a.candidates.length, "\uAC1C \u2014 \uD574\uB2F9\uD558\uB294 \uC81C\uD488\uC744 \uC120\uD0DD\uD558\uC138\uC694"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 6 } }, a.candidates.map((c) => /* @__PURE__ */ React.createElement("label", { key: c.id, style: { ...styles.pickChip, ...picked.includes(c.id) ? styles.pickChipActive : {}, cursor: "pointer" } }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: picked.includes(c.id), onChange: () => toggle(key, c.id), style: { marginRight: 5 } }), c.name))));
+    })))), /* @__PURE__ */ React.createElement("div", { style: styles.modalFooter }, /* @__PURE__ */ React.createElement("button", { style: styles.ghostBtn, onClick: onCancel }, "\uC804\uCCB4 \uCDE8\uC18C"), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: () => onConfirm(selections) }, "\uC120\uD0DD \uC644\uB8CC\uD558\uACE0 \uC77C\uAD04 \uB4F1\uB85D"))));
   }
   function ImportResultModal({ result, onClose }) {
     var _a;
