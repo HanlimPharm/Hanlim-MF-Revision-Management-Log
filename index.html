@@ -3171,7 +3171,7 @@
       setEditing(true);
     } }, "\uC218\uC815"), /* @__PURE__ */ React.createElement("button", { style: styles.chipActionBtn, onClick: onDelete }, "\uC0AD\uC81C")));
   }
-  function diffChangeFields(change, form) {
+  function diffChangeFields(change, form, products = []) {
     var _a, _b, _c, _d, _e, _f;
     const rows = [];
     const push = (label, from, to) => {
@@ -3185,18 +3185,33 @@
     const fromCount = ((_a = change.productIds) == null ? void 0 : _a.length) || 0;
     const toCount = ((_b = form.productIds) == null ? void 0 : _b.length) || 0;
     if (fromCount !== toCount || JSON.stringify([...change.productIds || []].sort()) !== JSON.stringify([...form.productIds || []].sort())) {
-      rows.push({ label: "\uAD00\uB828 \uC81C\uD488", from: `${fromCount}\uAC74`, to: `${toCount}\uAC74` });
+      const before = new Set(change.productIds || []);
+      const after = new Set(form.productIds || []);
+      const nameOf = (id) => {
+        var _a2;
+        return ((_a2 = products.find((p) => p.id === id)) == null ? void 0 : _a2.name) || "(\uC0AD\uC81C\uB41C \uC81C\uD488)";
+      };
+      rows.push({
+        label: "\uAD00\uB828 \uC81C\uD488",
+        from: `${fromCount}\uAC74`,
+        to: `${toCount}\uAC74`,
+        added: (form.productIds || []).filter((id) => !before.has(id)).map(nameOf),
+        removed: (change.productIds || []).filter((id) => !after.has(id)).map(nameOf)
+      });
     }
     if ((((_c = change.attachment) == null ? void 0 : _c.fileName) || "") !== (((_d = form.attachment) == null ? void 0 : _d.fileName) || "")) {
       rows.push({ label: "\uCCA8\uBD80\uD30C\uC77C", from: ((_e = change.attachment) == null ? void 0 : _e.fileName) || "(\uC5C6\uC74C)", to: ((_f = form.attachment) == null ? void 0 : _f.fileName) || "(\uC5C6\uC74C)" });
     }
     return rows;
   }
-  function EditRequestRow({ req, change, onApprove, onReject }) {
+  function EditRequestRow({ req, change, products, onApprove, onReject }) {
     var _a;
     const [open, setOpen] = useState(false);
-    const diffs = diffChangeFields(change, req.form);
-    return /* @__PURE__ */ React.createElement("div", { style: { border: `1px solid ${TOKENS.line}`, borderRadius: 6, padding: "8px 10px", marginBottom: 6, background: "#fff" } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12.5, flex: 1 } }, (_a = req.requestedBy) == null ? void 0 : _a.name, "\uB2D8\uC758 \uC81C\uC548 \xB7 ", req.requestedAt), /* @__PURE__ */ React.createElement("button", { style: styles.chipActionBtn, onClick: () => setOpen((o) => !o) }, open ? "\uB0B4\uC6A9 \uC811\uAE30" : "\uB0B4\uC6A9 \uBCF4\uAE30"), /* @__PURE__ */ React.createElement("button", { style: styles.chipActionBtn, onClick: onApprove }, "\uC2B9\uC778"), /* @__PURE__ */ React.createElement("button", { style: styles.chipActionBtn, onClick: onReject }, "\uAC70\uC808")), open && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 8, borderTop: `1px solid ${TOKENS.line}`, paddingTop: 8 } }, diffs.length === 0 ? /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, color: TOKENS.ink3 } }, "\uBCC0\uACBD\uB41C \uB0B4\uC6A9\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.") : diffs.map((d, i) => /* @__PURE__ */ React.createElement("div", { key: i, style: { fontSize: 12, marginBottom: 4 } }, /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 600 } }, d.label, ":"), " ", /* @__PURE__ */ React.createElement("span", { style: { color: TOKENS.ink3, textDecoration: "line-through" } }, d.from), " \u2192 ", /* @__PURE__ */ React.createElement("span", { style: { color: TOKENS.navy } }, d.to)))));
+    const diffs = diffChangeFields(change, req.form, products);
+    return /* @__PURE__ */ React.createElement("div", { style: { border: `1px solid ${TOKENS.line}`, borderRadius: 6, padding: "8px 10px", marginBottom: 6, background: "#fff" } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } }, /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12.5, flex: 1 } }, (_a = req.requestedBy) == null ? void 0 : _a.name, "\uB2D8\uC758 \uC81C\uC548 \xB7 ", req.requestedAt), /* @__PURE__ */ React.createElement("button", { style: styles.chipActionBtn, onClick: () => setOpen((o) => !o) }, open ? "\uB0B4\uC6A9 \uC811\uAE30" : "\uB0B4\uC6A9 \uBCF4\uAE30"), /* @__PURE__ */ React.createElement("button", { style: styles.chipActionBtn, onClick: onApprove }, "\uC2B9\uC778"), /* @__PURE__ */ React.createElement("button", { style: styles.chipActionBtn, onClick: onReject }, "\uAC70\uC808")), open && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 8, borderTop: `1px solid ${TOKENS.line}`, paddingTop: 8 } }, diffs.length === 0 ? /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, color: TOKENS.ink3 } }, "\uBCC0\uACBD\uB41C \uB0B4\uC6A9\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.") : diffs.map((d, i) => {
+      var _a2, _b;
+      return /* @__PURE__ */ React.createElement("div", { key: i, style: { fontSize: 12, marginBottom: 4 } }, /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 600 } }, d.label, ":"), " ", /* @__PURE__ */ React.createElement("span", { style: { color: TOKENS.ink3, textDecoration: "line-through" } }, d.from), " \u2192 ", /* @__PURE__ */ React.createElement("span", { style: { color: TOKENS.navy } }, d.to), ((_a2 = d.added) == null ? void 0 : _a2.length) > 0 && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 3, paddingLeft: 8 } }, /* @__PURE__ */ React.createElement("span", { style: { color: "#1B7F4B", fontWeight: 600 } }, "+ \uCD94\uAC00 (", d.added.length, ") "), /* @__PURE__ */ React.createElement("span", { style: { color: TOKENS.ink } }, d.added.join(", "))), ((_b = d.removed) == null ? void 0 : _b.length) > 0 && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 3, paddingLeft: 8 } }, /* @__PURE__ */ React.createElement("span", { style: { color: TOKENS.stamp, fontWeight: 600 } }, "\u2212 \uC0AD\uC81C (", d.removed.length, ") "), /* @__PURE__ */ React.createElement("span", { style: { color: TOKENS.ink } }, d.removed.join(", "))));
+    })));
   }
   function ChangeCard({ change, products, teams, categories, me, focusProductId, isFocusTarget, focusMemoId, onClearFocus, collapseSignal, showAllProducts, onSetCompletion, canManage, onEdit, onProposeEdit, editRequests, onApproveEdit, onRejectEdit, onCancelEditRequest, onDelete, showReassign, users, onReassign, onAddMemo, onEditMemo, onDeleteMemo, onAddReply, onEditReply, onDeleteReply, onDownloadFile, onViewInAllTab, showExportButton }) {
     var _a, _b;
@@ -3296,7 +3311,7 @@
           }
         }
       }
-    ), /* @__PURE__ */ React.createElement("button", { type: "button", style: styles.atBtn, onClick: () => mention.openMenu() }, "@"), /* @__PURE__ */ React.createElement("button", { style: styles.smallPrimaryBtn, onClick: submitMemo }, "\uB4F1\uB85D")), /* @__PURE__ */ React.createElement(MentionSummary, { users, teams, taggedIds: mention.taggedIds, taggedTeamIds: mention.taggedTeamIds, onRemoveUser: mention.removeUserTag, onRemoveTeam: mention.removeTeamTag }), mention.menuOpen && /* @__PURE__ */ React.createElement(MentionMenu, { anchorRef: mention.anchorRef, items: mention.items, highlight: mention.highlight, onPick: mention.pick, onClose: mention.closeMenu })), editRequests.length > 0 && /* @__PURE__ */ React.createElement("div", { style: styles.cardActionsRow, onClick: (e) => e.stopPropagation() }, canManage ? /* @__PURE__ */ React.createElement("div", { style: { width: "100%" } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12.5, fontWeight: 600, color: TOKENS.navy, marginBottom: 6 } }, "\uC218\uC815 \uC81C\uC548 ", editRequests.length, "\uAC74 \uB300\uAE30 \uC911"), editRequests.map((req) => /* @__PURE__ */ React.createElement(EditRequestRow, { key: req.id, req, change, onApprove: () => onApproveEdit(req), onReject: () => onRejectEdit(req) }))) : editRequests.filter((r) => {
+    ), /* @__PURE__ */ React.createElement("button", { type: "button", style: styles.atBtn, onClick: () => mention.openMenu() }, "@"), /* @__PURE__ */ React.createElement("button", { style: styles.smallPrimaryBtn, onClick: submitMemo }, "\uB4F1\uB85D")), /* @__PURE__ */ React.createElement(MentionSummary, { users, teams, taggedIds: mention.taggedIds, taggedTeamIds: mention.taggedTeamIds, onRemoveUser: mention.removeUserTag, onRemoveTeam: mention.removeTeamTag }), mention.menuOpen && /* @__PURE__ */ React.createElement(MentionMenu, { anchorRef: mention.anchorRef, items: mention.items, highlight: mention.highlight, onPick: mention.pick, onClose: mention.closeMenu })), editRequests.length > 0 && /* @__PURE__ */ React.createElement("div", { style: styles.cardActionsRow, onClick: (e) => e.stopPropagation() }, canManage ? /* @__PURE__ */ React.createElement("div", { style: { width: "100%" } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12.5, fontWeight: 600, color: TOKENS.navy, marginBottom: 6 } }, "\uC218\uC815 \uC81C\uC548 ", editRequests.length, "\uAC74 \uB300\uAE30 \uC911"), editRequests.map((req) => /* @__PURE__ */ React.createElement(EditRequestRow, { key: req.id, req, change, products, onApprove: () => onApproveEdit(req), onReject: () => onRejectEdit(req) }))) : editRequests.filter((r) => {
       var _a2;
       return ((_a2 = r.requestedBy) == null ? void 0 : _a2.empId) === me.empId;
     }).map((req) => /* @__PURE__ */ React.createElement("span", { key: req.id, style: { display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: TOKENS.ink3 } }, "\uB0B4\uAC00 \uC81C\uC548\uD55C \uC218\uC815\uC774 \uB4F1\uB85D\uC790 \uC2B9\uC778 \uB300\uAE30 \uC911\uC785\uB2C8\uB2E4.", /* @__PURE__ */ React.createElement("button", { style: styles.chipActionBtn, onClick: () => onCancelEditRequest(req) }, "\uC81C\uC548 \uCDE8\uC18C")))), /* @__PURE__ */ React.createElement("div", { style: styles.cardActionsRow, onClick: (e) => e.stopPropagation() }, canManage ? /* @__PURE__ */ React.createElement("button", { style: styles.chipActionBtn, onClick: onEdit }, "\uC218\uC815") : /* @__PURE__ */ React.createElement("button", { style: styles.chipActionBtn, onClick: onProposeEdit }, "\uC218\uC815 \uC81C\uC548"), canManage && /* @__PURE__ */ React.createElement("button", { style: styles.chipActionBtn, onClick: onDelete }, "\uC0AD\uC81C"), canManage && showReassign && !reassigning && /* @__PURE__ */ React.createElement("button", { style: styles.chipActionBtn, onClick: () => setReassigning(true) }, "\uB2F4\uB2F9\uC790 \uBCC0\uACBD"), canManage && showReassign && reassigning && /* @__PURE__ */ React.createElement("span", { style: { display: "flex", alignItems: "center", gap: 6 } }, /* @__PURE__ */ React.createElement("select", { style: styles.dateInput, defaultValue: "", onChange: (e) => {
