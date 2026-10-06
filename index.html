@@ -2860,12 +2860,52 @@
     };
     return /* @__PURE__ */ React.createElement("div", { style: styles.overlay, onMouseDown: (e) => e.target === e.currentTarget && onCancel() }, /* @__PURE__ */ React.createElement("div", { style: { ...styles.modal, width: 360 } }, /* @__PURE__ */ React.createElement("div", { style: styles.modalHeader }, /* @__PURE__ */ React.createElement("span", null, "\uC0AC\uC6A9\uC790 \uC9C1\uC811 \uCD94\uAC00"), /* @__PURE__ */ React.createElement("span", { style: styles.modalClose, onClick: onCancel }, "\xD7")), /* @__PURE__ */ React.createElement("div", { style: styles.modalBody }, /* @__PURE__ */ React.createElement("div", { style: styles.fieldLabel }, "\uC774\uB984"), /* @__PURE__ */ React.createElement("input", { style: styles.input, value: name, onChange: (e) => setName(e.target.value), placeholder: "\uC608) \uD64D\uAE38\uB3D9" }), /* @__PURE__ */ React.createElement("div", { style: { ...styles.fieldLabel, marginTop: 12 } }, "\uC0AC\uBC88"), /* @__PURE__ */ React.createElement("input", { style: styles.input, value: empId, onChange: (e) => setEmpId(e.target.value), placeholder: "\uC608) 2031045" }), /* @__PURE__ */ React.createElement("div", { style: { ...styles.fieldLabel, marginTop: 12 } }, "\uC18C\uC18D"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } }, teams.map((t) => /* @__PURE__ */ React.createElement("button", { key: t.id, style: { ...styles.teamPickBtn, ...team === t.id ? styles.teamPickBtnActive : {} }, onClick: () => setTeam(t.id) }, t.name))), /* @__PURE__ */ React.createElement("label", { style: styles.adminCheckRow }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: isAdmin, onChange: (e) => setIsAdmin(e.target.checked) }), " \uAD00\uB9AC\uC790\uB85C \uB4F1\uB85D"), /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11.5, color: TOKENS.ink3, marginTop: 8 } }, "\uCD08\uAE30 \uBE44\uBC00\uBC88\uD638\uB294 ", DEFAULT_PASSWORD, "\uB85C \uC124\uC815\uB429\uB2C8\uB2E4."), error && /* @__PURE__ */ React.createElement("div", { style: styles.errorText }, error)), /* @__PURE__ */ React.createElement("div", { style: styles.modalFooter }, /* @__PURE__ */ React.createElement("button", { style: styles.ghostBtn, onClick: onCancel }, "\uCDE8\uC18C"), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: submit }, "\uB4F1\uB85D"))));
   }
+  function formatDocNumberInput(v, prev) {
+    if (/^(CC-?)?[\d-]*$/i.test(v)) {
+      const digits = v.replace(/^CC-?/i, "").replace(/\D/g, "").slice(0, 8);
+      const deleting = v.length < prev.length;
+      if (digits.length === 0) return deleting ? "" : "CC-";
+      if (digits.length < 6) return `CC-${digits}`;
+      if (digits.length === 6) return deleting ? `CC-${digits}` : `CC-${digits}-`;
+      return `CC-${digits.slice(0, 6)}-${digits.slice(6)}`;
+    }
+    return v;
+  }
   function CompletionControl({ resolved, onComplete, onRevert, compact }) {
     const [editing, setEditing] = useState(false);
     const [date, setDate] = useState(isoToday());
     const [revNo, setRevNo] = useState("");
+    const [dateErr, setDateErr] = useState(false);
+    const isValidDate = (str) => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(str)) return false;
+      const [y, m, d] = str.split("-").map(Number);
+      const t = new Date(y, m - 1, d);
+      return t.getFullYear() === y && t.getMonth() === m - 1 && t.getDate() === d;
+    };
     if (resolved) return /* @__PURE__ */ React.createElement("span", { style: styles.completionDoneWrap }, /* @__PURE__ */ React.createElement("span", { style: styles.completionDoneTag }, "\uC644\uB8CC \xB7 ", dotFormat(resolved.date), resolved.revNo ? ` \xB7 Rev.${resolved.revNo}` : ""), /* @__PURE__ */ React.createElement("span", { style: styles.revertLink, onClick: onRevert }, "\uCDE8\uC18C"));
-    if (editing) return /* @__PURE__ */ React.createElement("span", { style: styles.completionEditWrap, onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement("input", { type: "date", value: date, onChange: (e) => setDate(e.target.value), style: styles.dateInput }), /* @__PURE__ */ React.createElement(
+    if (editing) return /* @__PURE__ */ React.createElement("span", { style: styles.completionEditWrap, onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement(
+      "input",
+      {
+        type: "text",
+        inputMode: "numeric",
+        placeholder: "YYYY-MM-DD",
+        maxLength: 10,
+        value: date,
+        onFocus: (e) => e.target.select(),
+        onChange: (e) => {
+          const v = e.target.value;
+          const digits = v.replace(/\D/g, "").slice(0, 8);
+          const deleting = v.length < date.length;
+          let f = digits;
+          if (digits.length >= 6) f = `${digits.slice(0, 4)}-${digits.slice(4, 6)}${digits.length > 6 || !deleting ? "-" : ""}${digits.slice(6)}`;
+          else if (digits.length >= 4) f = `${digits.slice(0, 4)}${digits.length > 4 || !deleting ? "-" : ""}${digits.slice(4)}`;
+          if (digits.length === 8) f = `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6)}`;
+          setDate(f);
+          setDateErr(false);
+        },
+        style: { ...styles.dateInput, width: 96, ...dateErr ? { borderColor: "#B3261E" } : {} }
+      }
+    ), /* @__PURE__ */ React.createElement(
       "input",
       {
         type: "text",
@@ -2877,6 +2917,10 @@
         style: { ...styles.dateInput, width: 54 }
       }
     ), /* @__PURE__ */ React.createElement("button", { style: styles.smallPrimaryBtn, onClick: () => {
+      if (!isValidDate(date)) {
+        setDateErr(true);
+        return;
+      }
       onComplete(date, revNo);
       setEditing(false);
     } }, "\uD655\uC778"), /* @__PURE__ */ React.createElement("button", { style: styles.smallGhostBtn, onClick: () => setEditing(false) }, "\uCDE8\uC18C"));
@@ -3206,7 +3250,7 @@
     }), relatedProducts.length === 0 && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12.5, color: TOKENS.ink3 } }, change.productIds.length === 0 ? "\uAD00\uB828 \uC81C\uD488\uC774 \uC9C0\uC815\uB418\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4. (\uC218\uC815 \uBC84\uD2BC\uC73C\uB85C \uC81C\uD488\uC744 \uCD94\uAC00\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4)" : "\uC0AD\uC81C\uB41C \uC81C\uD488\uB9CC \uC5F0\uACB0\uB418\uC5B4 \uC788\uC2B5\uB2C8\uB2E4"))) : /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, color: TOKENS.ink3, marginTop: 12 } }, "\uC774 \uD654\uBA74\uC740 \uC120\uD0DD\uD55C \uC81C\uD488\uC758 \uBC18\uC601 \uD604\uD669\uB9CC \uD45C\uC2DC\uD569\uB2C8\uB2E4. \uC804\uCCB4 \uC81C\uD488 \uD604\uD669\uC740 '\uC804\uCCB4 \uBCC0\uACBD \uC774\uB825'\uC5D0\uC11C \uD655\uC778\uD558\uC138\uC694."), onViewInAllTab && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 12 } }, /* @__PURE__ */ React.createElement("button", { style: styles.chipActionBtn, onClick: (e) => {
       e.stopPropagation();
       onViewInAllTab();
-    } }, "\uC804\uCCB4 \uBCC0\uACBD \uC774\uB825\uC5D0\uC11C \uBCF4\uAE30")), showExportButton && allDone && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 8 } }, /* @__PURE__ */ React.createElement("button", { style: styles.chipActionBtn, onClick: (e) => {
+    } }, "\uC804\uCCB4 \uBCC0\uACBD \uC774\uB825\uC5D0\uC11C \uBCF4\uAE30")), showExportButton && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 8 } }, /* @__PURE__ */ React.createElement("button", { style: styles.chipActionBtn, onClick: (e) => {
       e.stopPropagation();
       exportCompletionExcel();
     } }, "\u{1F4CA} \uC81C\uD488\uBCC4 \uC644\uB8CC \uD604\uD669 \uC5D1\uC140\uB85C \uCD94\uCD9C")), /* @__PURE__ */ React.createElement("div", { style: styles.fieldLabel }, "\uBA54\uBAA8"), /* @__PURE__ */ React.createElement("div", { style: styles.memoList }, change.memos && change.memos.length > 0 ? change.memos.map((m) => /* @__PURE__ */ React.createElement(
@@ -3257,7 +3301,7 @@
   }
   function ChangeForm({ categories, subcategories, products, me, teams, initial, defaultProductId, proposalMode, onUploadFile, onCancel, onSubmit }) {
     var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k;
-    const [docNumber, setDocNumber] = useState((_a = initial == null ? void 0 : initial.docNumber) != null ? _a : "");
+    const [docNumber, setDocNumber] = useState((_a = initial == null ? void 0 : initial.docNumber) != null ? _a : "CC-");
     const [changeName, setChangeName] = useState((_b = initial == null ? void 0 : initial.changeName) != null ? _b : "");
     const [historyText, setHistoryText] = useState((_c = initial == null ? void 0 : initial.historyText) != null ? _c : "");
     const [noteText, setNoteText] = useState((_d = initial == null ? void 0 : initial.noteText) != null ? _d : "");
@@ -3287,13 +3331,13 @@
       if (meta) setAttachment(meta);
     };
     const submit = () => {
-      if (!docNumber.trim()) return setError("\uBCC0\uACBD\uBB38\uC11C\uBC88\uD638\uB97C \uC785\uB825\uD574 \uC8FC\uC138\uC694.");
+      if (!docNumber.trim() || docNumber.trim().toUpperCase() === "CC-" || docNumber.trim().toUpperCase() === "CC") return setError("\uBCC0\uACBD\uBB38\uC11C\uBC88\uD638\uB97C \uC785\uB825\uD574 \uC8FC\uC138\uC694.");
       if (dueDate && dueDate.length !== 10) return setError("\uC644\uB8CC\uC608\uC815\uC77C\uC744 8\uC790\uB9AC \uC22B\uC790\uB85C \uBAA8\uB450 \uC785\uB825\uD574 \uC8FC\uC138\uC694. (\uC608: 20260115)");
       setError("");
       onSubmit({ docNumber, changeName, historyText, noteText, dueDate, productIds, attachment });
     };
     const searchResults = productSearch.trim() ? products.filter((p) => normHeader(p.name).includes(normHeader(productSearch))).slice().sort(byNameAsc) : [];
-    return /* @__PURE__ */ React.createElement("div", { style: styles.overlay, onMouseDown: (e) => e.target === e.currentTarget && onCancel() }, /* @__PURE__ */ React.createElement("div", { style: styles.modal }, /* @__PURE__ */ React.createElement("div", { style: styles.modalHeader }, /* @__PURE__ */ React.createElement("span", null, proposalMode ? "\uBCC0\uACBD \uC218\uC815 \uC81C\uC548" : isEdit ? "\uBCC0\uACBD \uC218\uC815" : "\uBCC0\uACBD \uB4F1\uB85D"), /* @__PURE__ */ React.createElement("span", { style: styles.modalClose, onClick: onCancel }, "\xD7")), /* @__PURE__ */ React.createElement("div", { style: styles.modalBody }, proposalMode ? /* @__PURE__ */ React.createElement("div", { style: styles.registrantBox }, "\uB4F1\uB85D\uC790 ", /* @__PURE__ */ React.createElement("strong", null, (_h = initial.registrant) == null ? void 0 : _h.name), " (", teamName(teams, (_i = initial.registrant) == null ? void 0 : _i.team), ")\uC758 \uBCC0\uACBD\uC785\uB2C8\uB2E4. \uC81C\uC548\uD558\uC2E0 \uB0B4\uC6A9\uC740 \uB4F1\uB85D\uC790\uAC00 \uC2B9\uC778\uD574\uC57C \uBC18\uC601\uB3FC\uC694.") : /* @__PURE__ */ React.createElement("div", { style: styles.registrantBox }, "\uB4F1\uB85D\uC790 ", /* @__PURE__ */ React.createElement("strong", null, isEdit ? (_j = initial.registrant) == null ? void 0 : _j.name : me.name), " (", teamName(teams, isEdit ? (_k = initial.registrant) == null ? void 0 : _k.team : me.team), ")"), /* @__PURE__ */ React.createElement(LabeledInput, { label: "\uBCC0\uACBD\uBB38\uC11C\uBC88\uD638", value: docNumber, onChange: setDocNumber, placeholder: "\uC608) CC-260101-01", mono: true }), /* @__PURE__ */ React.createElement(LabeledInput, { label: "\uBCC0\uACBD\uBA85", value: changeName, onChange: setChangeName, placeholder: "\uC608) \uC6D0\uB8CC \uC81C\uC870\uC6D0 \uCD94\uAC00" }), /* @__PURE__ */ React.createElement(LabeledTextarea, { label: "\uBCC0\uACBD \uB0B4\uC6A9", value: historyText, onChange: setHistoryText, placeholder: "\uBCC0\uACBD \uC0C1\uC138 \uB0B4\uC6A9" }), /* @__PURE__ */ React.createElement(LabeledTextarea, { label: "\uD2B9\uC774\uC0AC\uD56D \uAE30\uC7AC\uB780", value: noteText, onChange: setNoteText, placeholder: "\uCC38\uACE0\uC0AC\uD56D\uC774\uB098 \uC720\uC758\uD560 \uB0B4\uC6A9\uC744 \uC785\uB825\uD558\uC138\uC694" }), /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 14 } }, /* @__PURE__ */ React.createElement("div", { style: styles.fieldLabel }, "\uC644\uB8CC\uC608\uC815\uC77C"), /* @__PURE__ */ React.createElement(
+    return /* @__PURE__ */ React.createElement("div", { style: styles.overlay, onMouseDown: (e) => e.target === e.currentTarget && onCancel() }, /* @__PURE__ */ React.createElement("div", { style: styles.modal }, /* @__PURE__ */ React.createElement("div", { style: styles.modalHeader }, /* @__PURE__ */ React.createElement("span", null, proposalMode ? "\uBCC0\uACBD \uC218\uC815 \uC81C\uC548" : isEdit ? "\uBCC0\uACBD \uC218\uC815" : "\uBCC0\uACBD \uB4F1\uB85D"), /* @__PURE__ */ React.createElement("span", { style: styles.modalClose, onClick: onCancel }, "\xD7")), /* @__PURE__ */ React.createElement("div", { style: styles.modalBody }, proposalMode ? /* @__PURE__ */ React.createElement("div", { style: styles.registrantBox }, "\uB4F1\uB85D\uC790 ", /* @__PURE__ */ React.createElement("strong", null, (_h = initial.registrant) == null ? void 0 : _h.name), " (", teamName(teams, (_i = initial.registrant) == null ? void 0 : _i.team), ")\uC758 \uBCC0\uACBD\uC785\uB2C8\uB2E4. \uC81C\uC548\uD558\uC2E0 \uB0B4\uC6A9\uC740 \uB4F1\uB85D\uC790\uAC00 \uC2B9\uC778\uD574\uC57C \uBC18\uC601\uB3FC\uC694.") : /* @__PURE__ */ React.createElement("div", { style: styles.registrantBox }, "\uB4F1\uB85D\uC790 ", /* @__PURE__ */ React.createElement("strong", null, isEdit ? (_j = initial.registrant) == null ? void 0 : _j.name : me.name), " (", teamName(teams, isEdit ? (_k = initial.registrant) == null ? void 0 : _k.team : me.team), ")"), /* @__PURE__ */ React.createElement(LabeledInput, { label: "\uBCC0\uACBD\uBB38\uC11C\uBC88\uD638", value: docNumber, onChange: (v) => setDocNumber(formatDocNumberInput(v, docNumber)), placeholder: "\uC608) 26010101 \uC785\uB825 \uC2DC CC-260101-01\uB85C \uC790\uB3D9 \uBCC0\uD658", mono: true }), /* @__PURE__ */ React.createElement(LabeledInput, { label: "\uBCC0\uACBD\uBA85", value: changeName, onChange: setChangeName, placeholder: "\uC608) \uC6D0\uB8CC \uC81C\uC870\uC6D0 \uCD94\uAC00" }), /* @__PURE__ */ React.createElement(LabeledTextarea, { label: "\uBCC0\uACBD \uB0B4\uC6A9", value: historyText, onChange: setHistoryText, placeholder: "\uBCC0\uACBD \uC0C1\uC138 \uB0B4\uC6A9" }), /* @__PURE__ */ React.createElement(LabeledTextarea, { label: "\uD2B9\uC774\uC0AC\uD56D \uAE30\uC7AC\uB780", value: noteText, onChange: setNoteText, placeholder: "\uCC38\uACE0\uC0AC\uD56D\uC774\uB098 \uC720\uC758\uD560 \uB0B4\uC6A9\uC744 \uC785\uB825\uD558\uC138\uC694" }), /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 14 } }, /* @__PURE__ */ React.createElement("div", { style: styles.fieldLabel }, "\uC644\uB8CC\uC608\uC815\uC77C"), /* @__PURE__ */ React.createElement(
       "input",
       {
         type: "text",
