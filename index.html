@@ -1540,7 +1540,7 @@
           }
         }
         if (!found) {
-          setImportResult({ error: "\uC5D1\uC140\uC5D0\uC11C '\uBCC0\uACBD\uBB38\uC11C\uBC88\uD638' \uC81C\uBAA9\uC774 \uC788\uB294 \uC2DC\uD2B8\uB97C \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.\n'\uC591\uC2DD \uB2E4\uC6B4\uB85C\uB4DC'\uB85C \uBC1B\uC740 \uC591\uC2DD\uC758 1\uD589 \uC81C\uBAA9\uC744 \uADF8\uB300\uB85C \uC0AC\uC6A9\uD574 \uC8FC\uC138\uC694." });
+          setImportResult({ error: "\uC5D1\uC140\uC5D0\uC11C '\uBCC0\uACBD\uBB38\uC11C\uBC88\uD638' \uC81C\uBAA9\uC774 \uC788\uB294 \uC2DC\uD2B8\uB97C \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.\n'\uBCC0\uACBD \uC77C\uAD04 \uB4F1\uB85D \uC591\uC2DD \uB2E4\uC6B4\uB85C\uB4DC'\uB85C \uBC1B\uC740 \uC591\uC2DD\uC758 1\uD589 \uC81C\uBAA9\uC744 \uADF8\uB300\uB85C \uC0AC\uC6A9\uD574 \uC8FC\uC138\uC694." });
           return;
         }
         const productsByName = /* @__PURE__ */ new Map();
@@ -1587,7 +1587,6 @@
         };
         const existingDocs = new Set(changes.map((c) => c.docNumber.trim().toLowerCase()));
         const skipped = [];
-        const records = [];
         const pendingRows = [];
         for (let r = found.headerRow + 1; r < found.rows.length; r++) {
           const row = found.rows[r];
@@ -1623,45 +1622,14 @@
             dueDate: due.value || null
           };
           existingDocs.add(docKey);
-          if (ambiguous.length > 0) {
-            pendingRows.push({ rowNo, ...base, certainIds: productIds, ambiguous });
-          } else {
-            records.push({
-              id: uid(),
-              ...base,
-              productIds,
-              attachment: null,
-              createdAt: dotFormat(isoToday()),
-              completions: {},
-              memos: [],
-              registrant: { empId: me.empId, name: me.name, team: me.team }
-            });
-          }
+          pendingRows.push({ rowNo, ...base, certainIds: productIds, ambiguous });
         }
-        if (pendingRows.length > 0) {
-          setPendingImport({ records, skipped, pendingRows });
-          return;
-        }
-        if (records.length === 0) {
+        if (pendingRows.length === 0) {
           setImportResult({ added: 0, skipped, addedRows: [] });
           return;
         }
-        const base2 = Date.now();
-        records.forEach((rec, i) => {
-          rec.createdTs = base2 + (records.length - i);
-        });
-        const nextChanges = [...records, ...changes];
-        setChanges(nextChanges);
-        const ok = await persist({ changes: nextChanges });
-        if (!ok) {
-          setImportResult({ error: "\uC800\uC7A5 \uC911 \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4. \uC7A0\uC2DC \uD6C4 \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694." });
-          return;
-        }
-        setImportResult({
-          added: records.length,
-          skipped,
-          addedRows: records.map((rec) => ({ docNumber: rec.docNumber, productCount: rec.productIds.length }))
-        });
+        setPendingImport({ skipped, pendingRows });
+        return;
       } catch (e) {
         setImportResult({ error: "\uC5D1\uC140 \uD30C\uC77C\uC744 \uC77D\uB294 \uC911 \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4. \uD30C\uC77C \uD615\uC2DD(.xlsx)\uC744 \uD655\uC778\uD574 \uC8FC\uC138\uC694." });
       } finally {
@@ -1694,7 +1662,7 @@
           registrant: { empId: me.empId, name: me.name, team: me.team }
         };
       });
-      const records = [...pendingImport.records, ...resolvedRecords];
+      const records = resolvedRecords;
       const skipped = pendingImport.skipped;
       setPendingImport(null);
       if (records.length === 0) {
@@ -1715,7 +1683,10 @@
       setImportResult({
         added: records.length,
         skipped,
-        addedRows: records.map((rec) => ({ docNumber: rec.docNumber, productCount: rec.productIds.length }))
+        addedRows: records.map((rec) => ({ docNumber: rec.docNumber, changeName: rec.changeName, productNames: rec.productIds.map((id) => {
+          var _a;
+          return (_a = products.find((p) => p.id === id)) == null ? void 0 : _a.name;
+        }).filter(Boolean) }))
       });
     };
     const resolveMentionRecipients = (taggedEmpIds, taggedTeamIds) => {
@@ -2101,7 +2072,7 @@
         onAddUserDirect: addUserDirect,
         onViewUser: (empId) => setSelection({ type: "viewUser", targetEmpId: empId })
       }
-    ) : selection.type === "archive" ? /* @__PURE__ */ React.createElement(ArchivePanel, { archived, isAdmin: me.isAdmin, onRestore: restoreArchivedChange, onDownloadFile: downloadMemoFile }) : selection.type === "notices" ? /* @__PURE__ */ React.createElement(NoticesPanel, { notices, isAdmin: me.isAdmin, onAdd: addNotice, onUpdate: updateNotice, onDelete: deleteNotice, onUploadFile: uploadMemoFile, onDownloadFile: downloadMemoFile }) : selection.type === "alarms" ? /* @__PURE__ */ React.createElement(AlarmsPanel, { alarms: myAlarms, onNavigate: openAlarm, onMarkRead: markAlarmRead, onDelete: deleteAlarm, onClearRead: clearReadAlarms }) : selection.type === "trash" ? /* @__PURE__ */ React.createElement(TrashPanel, { trash: myTrash, products, categories, onRestore: restoreTrashItem, onPermanentDelete: permanentlyDeleteTrashItem }) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: styles.mainHeaderRow }, /* @__PURE__ */ React.createElement("h2", { style: styles.mainTitle }, mainTitle), /* @__PURE__ */ React.createElement("span", { style: styles.mainCount }, visibleChanges.length, "\uAC74"), /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }), selection.type === "mytask" && /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 6, marginRight: 8 } }, /* @__PURE__ */ React.createElement("input", { ref: changeImportRef, type: "file", accept: ".xlsx,.xls", style: { display: "none" }, onChange: handleChangeImportPick }), /* @__PURE__ */ React.createElement("button", { style: styles.smallGhostBtn, onClick: downloadChangeTemplate }, "\uC591\uC2DD \uB2E4\uC6B4\uB85C\uB4DC"), /* @__PURE__ */ React.createElement("button", { style: styles.smallGhostBtn, disabled: importingChanges, onClick: () => {
+    ) : selection.type === "archive" ? /* @__PURE__ */ React.createElement(ArchivePanel, { archived, isAdmin: me.isAdmin, onRestore: restoreArchivedChange, onDownloadFile: downloadMemoFile }) : selection.type === "notices" ? /* @__PURE__ */ React.createElement(NoticesPanel, { notices, isAdmin: me.isAdmin, onAdd: addNotice, onUpdate: updateNotice, onDelete: deleteNotice, onUploadFile: uploadMemoFile, onDownloadFile: downloadMemoFile }) : selection.type === "alarms" ? /* @__PURE__ */ React.createElement(AlarmsPanel, { alarms: myAlarms, onNavigate: openAlarm, onMarkRead: markAlarmRead, onDelete: deleteAlarm, onClearRead: clearReadAlarms }) : selection.type === "trash" ? /* @__PURE__ */ React.createElement(TrashPanel, { trash: myTrash, products, categories, onRestore: restoreTrashItem, onPermanentDelete: permanentlyDeleteTrashItem }) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: styles.mainHeaderRow }, /* @__PURE__ */ React.createElement("h2", { style: styles.mainTitle }, mainTitle), /* @__PURE__ */ React.createElement("span", { style: styles.mainCount }, visibleChanges.length, "\uAC74"), /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }), selection.type === "mytask" && /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 6, marginRight: 8 } }, /* @__PURE__ */ React.createElement("input", { ref: changeImportRef, type: "file", accept: ".xlsx,.xls", style: { display: "none" }, onChange: handleChangeImportPick }), /* @__PURE__ */ React.createElement("button", { style: styles.smallGhostBtn, onClick: downloadChangeTemplate }, "\uBCC0\uACBD \uC77C\uAD04 \uB4F1\uB85D \uC591\uC2DD \uB2E4\uC6B4\uB85C\uB4DC"), /* @__PURE__ */ React.createElement("button", { style: styles.smallGhostBtn, disabled: importingChanges, onClick: () => {
       var _a;
       return (_a = changeImportRef.current) == null ? void 0 : _a.click();
     } }, importingChanges ? "\uB4F1\uB85D \uC911\u2026" : "\u{1F4E5} \uC5D1\uC140\uB85C \uBCC0\uACBD \uC77C\uAD04 \uB4F1\uB85D")), selection.type === "viewUser" && /* @__PURE__ */ React.createElement(
@@ -2164,7 +2135,7 @@
         onRenameCustomTab: renameCustomTab,
         onDeleteCustomTab: deleteCustomTab
       }
-    ), pendingImport && /* @__PURE__ */ React.createElement(ImportResolveModal, { pendingImport, onCancel: () => setPendingImport(null), onConfirm: finalizeImportWithResolution }), importResult && /* @__PURE__ */ React.createElement(ImportResultModal, { result: importResult, onClose: () => setImportResult(null) }), confirmState && /* @__PURE__ */ React.createElement(ConfirmModal, { message: confirmState.message, onYes: () => resolveConfirm(true), onNo: () => resolveConfirm(false) }), toast && /* @__PURE__ */ React.createElement("div", { style: styles.toast }, toast), saving && /* @__PURE__ */ React.createElement("div", { style: styles.savingDot, title: "\uC800\uC7A5 \uC911" }));
+    ), pendingImport && /* @__PURE__ */ React.createElement(ImportResolveModal, { pendingImport, products, onCancel: () => setPendingImport(null), onConfirm: finalizeImportWithResolution }), importResult && /* @__PURE__ */ React.createElement(ImportResultModal, { result: importResult, onClose: () => setImportResult(null) }), confirmState && /* @__PURE__ */ React.createElement(ConfirmModal, { message: confirmState.message, onYes: () => resolveConfirm(true), onNo: () => resolveConfirm(false) }), toast && /* @__PURE__ */ React.createElement("div", { style: styles.toast }, toast), saving && /* @__PURE__ */ React.createElement("div", { style: styles.savingDot, title: "\uC800\uC7A5 \uC911" }));
   }
   function MoveProductControl({ product, categories, subcategories, onMove }) {
     const [open, setOpen] = useState(false);
@@ -2720,8 +2691,17 @@
     };
     return /* @__PURE__ */ React.createElement("div", { style: { ...styles.card, ...styles.cardCompleted } }, /* @__PURE__ */ React.createElement("div", { style: styles.cardTop, onClick: () => setOpen((o) => !o) }, /* @__PURE__ */ React.createElement("div", { style: { flex: 1, minWidth: 0 } }, /* @__PURE__ */ React.createElement("div", { style: styles.cardTitleRow }, /* @__PURE__ */ React.createElement("span", { style: styles.docNumberTitle }, rec.docNumber), rec.changeName && /* @__PURE__ */ React.createElement("span", { style: styles.changeNameText }, rec.changeName)), /* @__PURE__ */ React.createElement("div", { style: styles.cardMeta }, "\uB4F1\uB85D\uC77C ", rec.createdAt, " \xB7 ", (_a = rec.registrant) == null ? void 0 : _a.name, " \xB7 \uAD00\uB828 \uC81C\uD488 ", rows.length, "\uAC74", lastDate && /* @__PURE__ */ React.createElement("span", { style: styles.finalDoneTag }, "\uCD5C\uC885 \uBC18\uC601\uC77C ", dotFormat(lastDate)), /* @__PURE__ */ React.createElement("span", { style: styles.progressTag }, "\uBCF4\uAD00 ", rec.archivedAt))), /* @__PURE__ */ React.createElement("span", { style: styles.chevronBtn }, open ? "\u25BE" : "\u25B8")), open && /* @__PURE__ */ React.createElement("div", { style: styles.cardBody }, /* @__PURE__ */ React.createElement(Field, { label: "\uBCC0\uACBD \uB0B4\uC6A9", value: rec.historyText }), /* @__PURE__ */ React.createElement(Field, { label: "\uD2B9\uC774\uC0AC\uD56D \uAE30\uC7AC\uB780", value: rec.noteText, emphasize: true }), rec.attachment && /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 14 } }, /* @__PURE__ */ React.createElement("div", { style: styles.fieldLabel }, "\uCCA8\uBD80\uD30C\uC77C"), /* @__PURE__ */ React.createElement("div", { style: styles.attachmentChip, onClick: () => onDownloadFile(rec.attachment) }, "\u{1F4CE} ", rec.attachment.fileName)), /* @__PURE__ */ React.createElement("div", { style: styles.fieldLabel }, "\uC81C\uD488\uBCC4 \uBC18\uC601 \uD604\uD669"), rows.length === 0 ? /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12.5, color: TOKENS.ink3 } }, "\uAD00\uB828 \uC81C\uD488\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.") : /* @__PURE__ */ React.createElement("div", { style: styles.productStatusList }, rows.map((r, i) => /* @__PURE__ */ React.createElement("div", { key: i, style: styles.productStatusRow }, /* @__PURE__ */ React.createElement("span", { style: styles.productStatusName }, r.name), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12.5, color: TOKENS.ink2 } }, r.c ? `Rev.${r.c.revNo || "-"} \xB7 ${dotFormat(r.c.date)}` : "\uBBF8\uC644\uB8CC")))), /* @__PURE__ */ React.createElement("div", { style: { ...styles.fieldLabel, marginTop: 14 } }, "\uBA54\uBAA8"), (rec.memos || []).length === 0 ? /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12.5, color: TOKENS.ink3 } }, "\uBA54\uBAA8\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.") : (rec.memos || []).map((m) => /* @__PURE__ */ React.createElement("div", { key: m.id, style: { marginBottom: 8, paddingBottom: 8, borderBottom: `1px solid ${TOKENS.line}` } }, /* @__PURE__ */ React.createElement("div", { style: styles.memoMeta }, m.authorName, " \xB7 ", m.createdAt), /* @__PURE__ */ React.createElement("div", { style: styles.memoText }, m.text), (m.replies || []).map((r) => /* @__PURE__ */ React.createElement("div", { key: r.id, style: { marginLeft: 16, marginTop: 6 } }, /* @__PURE__ */ React.createElement("div", { style: styles.memoMeta }, "\u21B3 ", r.authorName, " \xB7 ", r.createdAt), /* @__PURE__ */ React.createElement("div", { style: styles.memoText }, r.text))))), /* @__PURE__ */ React.createElement("div", { style: { ...styles.cardActionsRow } }, /* @__PURE__ */ React.createElement("button", { style: styles.chipActionBtn, onClick: exportExcel }, "\u{1F4CA} \uC81C\uD488\uBCC4 \uC644\uB8CC \uD604\uD669 \uC5D1\uC140\uB85C \uCD94\uCD9C"), isAdmin && /* @__PURE__ */ React.createElement("button", { style: styles.chipActionBtn, onClick: () => onRestore(rec) }, "\uBCF4\uAD00\uD568\uC5D0\uC11C \uBCF5\uC6D0"))));
   }
-  function ImportResolveModal({ pendingImport, onCancel, onConfirm }) {
+  function ProductNameList({ names }) {
+    if (names.length === 0) return /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, color: TOKENS.ink3, padding: "4px 0" } }, "\uC5F0\uACB0\uB41C \uC81C\uD488\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.");
+    return /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 5, padding: "6px 0 2px" } }, names.map((n, i) => /* @__PURE__ */ React.createElement("span", { key: i, style: { fontSize: 12, padding: "2px 8px", borderRadius: 10, background: "#E7ECF1", border: "1px solid #C7D3E0", color: TOKENS.navy } }, n)));
+  }
+  function ImportResolveModal({ pendingImport, products, onCancel, onConfirm }) {
     const [selections, setSelections] = useState({});
+    const [openRows, setOpenRows] = useState({});
+    const nameOf = (id) => {
+      var _a;
+      return (_a = products.find((p) => p.id === id)) == null ? void 0 : _a.name;
+    };
     const toggle = (key, productId) => {
       setSelections((prev) => {
         const cur = prev[key] || [];
@@ -2729,20 +2709,41 @@
         return { ...prev, [key]: next };
       });
     };
+    const setAll = (key, candidates, on) => setSelections((prev) => ({ ...prev, [key]: on ? candidates.map((c) => c.id) : [] }));
+    const setEveryCandidate = (on) => {
+      const next = {};
+      if (on) pendingImport.pendingRows.forEach((row) => row.ambiguous.forEach((a) => {
+        next[`${row.rowNo}::${a.name}`] = a.candidates.map((c) => c.id);
+      }));
+      setSelections(next);
+    };
+    const finalIdsOf = (row) => Array.from(/* @__PURE__ */ new Set([...row.certainIds, ...row.ambiguous.flatMap((a) => selections[`${row.rowNo}::${a.name}`] || [])]));
     const totalAmbiguous = pendingImport.pendingRows.reduce((sum, r) => sum + r.ambiguous.length, 0);
+    const total = pendingImport.pendingRows.length;
     return /* @__PURE__ */ React.createElement("div", { style: styles.overlay, onMouseDown: (e) => {
       if (e.target === e.currentTarget) onCancel();
-    } }, /* @__PURE__ */ React.createElement("div", { style: { ...styles.modal, width: 620, maxHeight: "85vh", display: "flex", flexDirection: "column" } }, /* @__PURE__ */ React.createElement("div", { style: styles.modalHeader }, /* @__PURE__ */ React.createElement("span", null, "\uC81C\uD488\uBA85 \uD655\uC778 \uD544\uC694 (", totalAmbiguous, "\uAC74)"), /* @__PURE__ */ React.createElement("span", { style: styles.modalClose, onClick: onCancel }, "\xD7")), /* @__PURE__ */ React.createElement("div", { style: { ...styles.modalBody, overflowY: "auto" } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12.5, color: TOKENS.ink3, marginBottom: 14, lineHeight: 1.6 } }, "\uC785\uB825\uD558\uC2E0 \uAE00\uC790\uAC00 \uC5EC\uB7EC \uC81C\uD488\uBA85\uC5D0 \uD3EC\uD568\uB418\uC5B4 \uC788\uC5B4 \uC5B4\uB5A4 \uC81C\uD488\uC778\uC9C0 \uC9C1\uC811 \uACE8\uB77C\uC8FC\uC138\uC694. \uC544\uBB34\uAC83\uB3C4 \uC120\uD0DD\uD558\uC9C0 \uC54A\uC73C\uBA74 \uD574\uB2F9 \uC774\uB984\uC740 \uC81C\uD488 \uC5C6\uC774 \uB4F1\uB85D\uB429\uB2C8\uB2E4."), pendingImport.pendingRows.map((row) => /* @__PURE__ */ React.createElement("div", { key: row.rowNo, style: { border: `1px solid ${TOKENS.line}`, borderRadius: 6, padding: "10px 12px", marginBottom: 12 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13, fontWeight: 600, marginBottom: 8 } }, row.rowNo, "\uD589 \xB7 ", /* @__PURE__ */ React.createElement("span", { style: { fontFamily: MONO } }, row.docNumber), row.changeName ? ` \u2014 ${row.changeName}` : ""), row.ambiguous.map((a) => {
-      const key = `${row.rowNo}::${a.name}`;
-      const picked = selections[key] || [];
-      return /* @__PURE__ */ React.createElement("div", { key, style: { marginBottom: 8 } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12.5, color: TOKENS.ink2, marginBottom: 4 } }, '"', a.name, '"\uACFC \uC77C\uCE58\uD558\uB294 \uC81C\uD488 ', a.candidates.length, "\uAC1C \u2014 \uD574\uB2F9\uD558\uB294 \uC81C\uD488\uC744 \uC120\uD0DD\uD558\uC138\uC694"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 6 } }, a.candidates.map((c) => /* @__PURE__ */ React.createElement("label", { key: c.id, style: { ...styles.pickChip, ...picked.includes(c.id) ? styles.pickChipActive : {}, cursor: "pointer" } }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: picked.includes(c.id), onChange: () => toggle(key, c.id), style: { marginRight: 5 } }), c.name))));
-    })))), /* @__PURE__ */ React.createElement("div", { style: styles.modalFooter }, /* @__PURE__ */ React.createElement("button", { style: styles.ghostBtn, onClick: onCancel }, "\uC804\uCCB4 \uCDE8\uC18C"), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: () => onConfirm(selections) }, "\uC120\uD0DD \uC644\uB8CC\uD558\uACE0 \uC77C\uAD04 \uB4F1\uB85D"))));
+    } }, /* @__PURE__ */ React.createElement("div", { style: { ...styles.modal, width: 680, maxHeight: "88vh", display: "flex", flexDirection: "column" } }, /* @__PURE__ */ React.createElement("div", { style: styles.modalHeader }, /* @__PURE__ */ React.createElement("span", null, totalAmbiguous > 0 ? `\uC77C\uAD04 \uB4F1\uB85D \uD655\uC778 \xB7 \uC81C\uD488\uBA85 \uD655\uC778 \uD544\uC694 (${totalAmbiguous}\uAC74)` : "\uC77C\uAD04 \uB4F1\uB85D \uC804 \uD655\uC778"), /* @__PURE__ */ React.createElement("span", { style: styles.modalClose, onClick: onCancel }, "\xD7")), /* @__PURE__ */ React.createElement("div", { style: { ...styles.modalBody, overflowY: "auto" } }, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12.5, color: TOKENS.ink3, marginBottom: 12, lineHeight: 1.6 } }, "\uB4F1\uB85D\uB420 \uBCC0\uACBD ", /* @__PURE__ */ React.createElement("strong", null, total, "\uAC74"), "\uC785\uB2C8\uB2E4. \uAC01 \uBCC0\uACBD\uC758 '\uC81C\uD488 \uBCF4\uAE30'\uC5D0\uC11C \uCD5C\uC885 \uC5F0\uACB0\uB420 \uC81C\uD488\uC744 \uBAA8\uB450 \uD655\uC778\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4.", totalAmbiguous > 0 && " \uC785\uB825\uD558\uC2E0 \uAE00\uC790\uAC00 \uC5EC\uB7EC \uC81C\uD488\uBA85\uC5D0 \uD3EC\uD568\uB41C \uACBD\uC6B0\uC5D0\uB294 \uD574\uB2F9\uD558\uB294 \uC81C\uD488\uC744 \uC9C1\uC811 \uACE8\uB77C\uC8FC\uC138\uC694. \uC544\uBB34\uAC83\uB3C4 \uC120\uD0DD\uD558\uC9C0 \uC54A\uC73C\uBA74 \uD574\uB2F9 \uC774\uB984\uC740 \uC81C\uD488 \uC5C6\uC774 \uB4F1\uB85D\uB429\uB2C8\uB2E4."), totalAmbiguous > 0 && /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 6, marginBottom: 12 } }, /* @__PURE__ */ React.createElement("button", { style: styles.smallGhostBtn, onClick: () => setEveryCandidate(true) }, "\uD655\uC778 \uD544\uC694\uD55C \uC81C\uD488 \uC804\uCCB4 \uC120\uD0DD"), /* @__PURE__ */ React.createElement("button", { style: styles.smallGhostBtn, onClick: () => setEveryCandidate(false) }, "\uC804\uCCB4 \uC120\uD0DD \uD574\uC81C")), pendingImport.pendingRows.map((row) => {
+      const names = finalIdsOf(row).map(nameOf).filter(Boolean);
+      const open = !!openRows[row.rowNo];
+      return /* @__PURE__ */ React.createElement("div", { key: row.rowNo, style: { border: `1px solid ${row.ambiguous.length ? "#E8B923" : TOKENS.line}`, borderRadius: 6, padding: "10px 12px", marginBottom: 10 } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600 } }, /* @__PURE__ */ React.createElement("span", { style: { flex: 1 } }, row.rowNo, "\uD589 \xB7 ", /* @__PURE__ */ React.createElement("span", { style: { fontFamily: MONO } }, row.docNumber), row.changeName ? ` \u2014 ${row.changeName}` : ""), /* @__PURE__ */ React.createElement("span", { style: { fontWeight: 400, fontSize: 12.5, color: names.length === 0 ? TOKENS.ink3 : TOKENS.navy } }, names.length === 0 ? "\uC81C\uD488 \uBBF8\uC9C0\uC815" : `\uC81C\uD488 ${names.length}\uAC1C`), /* @__PURE__ */ React.createElement("span", { style: styles.tinyLink, onClick: () => setOpenRows((o) => ({ ...o, [row.rowNo]: !o[row.rowNo] })) }, open ? "\uC811\uAE30 \u25B2" : "\uC81C\uD488 \uBCF4\uAE30 \u25BC")), open && /* @__PURE__ */ React.createElement(ProductNameList, { names }), row.ambiguous.map((a) => {
+        const key = `${row.rowNo}::${a.name}`;
+        const picked = selections[key] || [];
+        const allPicked = picked.length === a.candidates.length;
+        return /* @__PURE__ */ React.createElement("div", { key, style: { marginTop: 10 } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: TOKENS.ink2, marginBottom: 5 } }, /* @__PURE__ */ React.createElement("span", { style: { flex: 1 } }, '"', a.name, '"\uACFC \uC77C\uCE58\uD558\uB294 \uC81C\uD488 ', a.candidates.length, "\uAC1C \u2014 \uD574\uB2F9\uD558\uB294 \uC81C\uD488\uC744 \uC120\uD0DD\uD558\uC138\uC694"), /* @__PURE__ */ React.createElement("button", { style: styles.smallGhostBtn, onClick: () => setAll(key, a.candidates, !allPicked) }, allPicked ? "\uBAA8\uB450 \uD574\uC81C" : "\uD574\uB2F9 \uC81C\uD488 \uBAA8\uB450 \uC120\uD0DD")), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 6 } }, a.candidates.map((c) => /* @__PURE__ */ React.createElement("label", { key: c.id, style: { ...styles.pickChip, ...picked.includes(c.id) ? styles.pickChipActive : {}, cursor: "pointer" } }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: picked.includes(c.id), onChange: () => toggle(key, c.id), style: { marginRight: 5 } }), c.name))));
+      }));
+    }), pendingImport.skipped.length > 0 && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 14 } }, /* @__PURE__ */ React.createElement("div", { style: styles.fieldLabel }, "\uB4F1\uB85D\uB418\uC9C0 \uC54A\uB294 \uD589 (\uAC74\uB108\uB700 ", pendingImport.skipped.length, "\uAC74)"), /* @__PURE__ */ React.createElement("div", { style: { border: `1px solid ${TOKENS.line}`, borderRadius: 6, maxHeight: 120, overflowY: "auto" } }, pendingImport.skipped.map((sk, i) => /* @__PURE__ */ React.createElement("div", { key: i, style: { display: "flex", gap: 10, padding: "6px 10px", fontSize: 12.5, borderTop: i === 0 ? "none" : `1px solid ${TOKENS.line}` } }, /* @__PURE__ */ React.createElement("span", { style: { color: TOKENS.ink3, whiteSpace: "nowrap" } }, sk.rowNo, "\uD589"), /* @__PURE__ */ React.createElement("span", { style: { fontFamily: MONO, whiteSpace: "nowrap" } }, sk.docNumber), /* @__PURE__ */ React.createElement("span", { style: { color: TOKENS.stamp } }, sk.reason)))))), /* @__PURE__ */ React.createElement("div", { style: styles.modalFooter }, /* @__PURE__ */ React.createElement("button", { style: styles.ghostBtn, onClick: onCancel }, "\uC804\uCCB4 \uCDE8\uC18C"), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: () => onConfirm(selections) }, total, "\uAC74 \uC77C\uAD04 \uB4F1\uB85D"))));
+  }
+  function ImportResultRow({ r, first }) {
+    var _a, _b, _c;
+    const [open, setOpen] = useState(false);
+    const n = (_c = (_b = (_a = r.productNames) == null ? void 0 : _a.length) != null ? _b : r.productCount) != null ? _c : 0;
+    return /* @__PURE__ */ React.createElement("div", { style: { padding: "6px 10px", fontSize: 12.5, borderTop: first ? "none" : `1px solid ${TOKENS.line}` } }, /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 10, alignItems: "center" } }, /* @__PURE__ */ React.createElement("span", { style: { fontFamily: MONO, flex: 1 } }, r.docNumber, r.changeName ? ` \u2014 ${r.changeName}` : ""), /* @__PURE__ */ React.createElement("span", { style: { color: n === 0 ? TOKENS.ink3 : TOKENS.navy } }, n === 0 ? "\uC81C\uD488 \uBBF8\uC9C0\uC815" : `\uC81C\uD488 ${n}\uAC1C`), n > 0 && /* @__PURE__ */ React.createElement("span", { style: styles.tinyLink, onClick: () => setOpen((o) => !o) }, open ? "\uC811\uAE30 \u25B2" : "\uC0C1\uC138\uBCF4\uAE30 \u25BC")), open && /* @__PURE__ */ React.createElement(ProductNameList, { names: r.productNames || [] }));
   }
   function ImportResultModal({ result, onClose }) {
     var _a;
     return /* @__PURE__ */ React.createElement("div", { style: styles.overlay, onMouseDown: (e) => {
       if (e.target === e.currentTarget) onClose();
-    } }, /* @__PURE__ */ React.createElement("div", { style: { ...styles.modal, width: 580 } }, /* @__PURE__ */ React.createElement("div", { style: styles.modalHeader }, /* @__PURE__ */ React.createElement("span", null, "\uBCC0\uACBD \uC77C\uAD04 \uB4F1\uB85D \uACB0\uACFC"), /* @__PURE__ */ React.createElement("span", { style: styles.modalClose, onClick: onClose }, "\xD7")), /* @__PURE__ */ React.createElement("div", { style: styles.modalBody }, result.error ? /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13.5, lineHeight: 1.7, whiteSpace: "pre-line", color: TOKENS.ink } }, result.error) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 14, marginBottom: 12 } }, "\uB4F1\uB85D ", /* @__PURE__ */ React.createElement("strong", null, result.added, "\uAC74"), " \xB7 \uAC74\uB108\uB700 ", /* @__PURE__ */ React.createElement("strong", null, result.skipped.length, "\uAC74")), ((_a = result.addedRows) == null ? void 0 : _a.length) > 0 && /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 14 } }, /* @__PURE__ */ React.createElement("div", { style: styles.fieldLabel }, "\uB4F1\uB85D\uB41C \uBCC0\uACBD (\uC5F0\uACB0\uB41C \uC81C\uD488 \uC218)"), /* @__PURE__ */ React.createElement("div", { style: { border: `1px solid ${TOKENS.line}`, borderRadius: 6, maxHeight: 170, overflowY: "auto" } }, result.addedRows.map((r, i) => /* @__PURE__ */ React.createElement("div", { key: i, style: { display: "flex", gap: 10, padding: "6px 10px", fontSize: 12.5, borderTop: i === 0 ? "none" : `1px solid ${TOKENS.line}` } }, /* @__PURE__ */ React.createElement("span", { style: { fontFamily: MONO, flex: 1 } }, r.docNumber), /* @__PURE__ */ React.createElement("span", { style: { color: r.productCount === 0 ? TOKENS.ink3 : TOKENS.navy } }, r.productCount === 0 ? "\uC81C\uD488 \uBBF8\uC9C0\uC815" : `\uC81C\uD488 ${r.productCount}\uAC1C`))))), result.skipped.length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: styles.fieldLabel }, "\uAC74\uB108\uB6F4 \uD589"), /* @__PURE__ */ React.createElement("div", { style: { border: `1px solid ${TOKENS.line}`, borderRadius: 6, overflow: "hidden" } }, result.skipped.map((s, i) => /* @__PURE__ */ React.createElement("div", { key: i, style: { display: "flex", gap: 10, padding: "7px 10px", fontSize: 12.5, borderTop: i === 0 ? "none" : `1px solid ${TOKENS.line}`, background: i % 2 ? "#FAF8F1" : "transparent" } }, /* @__PURE__ */ React.createElement("span", { style: { color: TOKENS.ink3, whiteSpace: "nowrap" } }, s.rowNo, "\uD589"), /* @__PURE__ */ React.createElement("span", { style: { fontFamily: MONO, whiteSpace: "nowrap" } }, s.docNumber), /* @__PURE__ */ React.createElement("span", { style: { color: TOKENS.stamp } }, s.reason))))))), /* @__PURE__ */ React.createElement("div", { style: styles.modalFooter }, /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: onClose }, "\uD655\uC778"))));
+    } }, /* @__PURE__ */ React.createElement("div", { style: { ...styles.modal, width: 580 } }, /* @__PURE__ */ React.createElement("div", { style: styles.modalHeader }, /* @__PURE__ */ React.createElement("span", null, "\uBCC0\uACBD \uC77C\uAD04 \uB4F1\uB85D \uACB0\uACFC"), /* @__PURE__ */ React.createElement("span", { style: styles.modalClose, onClick: onClose }, "\xD7")), /* @__PURE__ */ React.createElement("div", { style: styles.modalBody }, result.error ? /* @__PURE__ */ React.createElement("div", { style: { fontSize: 13.5, lineHeight: 1.7, whiteSpace: "pre-line", color: TOKENS.ink } }, result.error) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: { fontSize: 14, marginBottom: 12 } }, "\uB4F1\uB85D ", /* @__PURE__ */ React.createElement("strong", null, result.added, "\uAC74"), " \xB7 \uAC74\uB108\uB700 ", /* @__PURE__ */ React.createElement("strong", null, result.skipped.length, "\uAC74")), ((_a = result.addedRows) == null ? void 0 : _a.length) > 0 && /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 14 } }, /* @__PURE__ */ React.createElement("div", { style: styles.fieldLabel }, "\uB4F1\uB85D\uB41C \uBCC0\uACBD (\uC0C1\uC138\uBCF4\uAE30\uC5D0\uC11C \uC5F0\uACB0\uB41C \uC81C\uD488 \uC804\uCCB4 \uD655\uC778)"), /* @__PURE__ */ React.createElement("div", { style: { border: `1px solid ${TOKENS.line}`, borderRadius: 6, maxHeight: 260, overflowY: "auto" } }, result.addedRows.map((r, i) => /* @__PURE__ */ React.createElement(ImportResultRow, { key: i, r, first: i === 0 })))), result.skipped.length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: styles.fieldLabel }, "\uAC74\uB108\uB6F4 \uD589"), /* @__PURE__ */ React.createElement("div", { style: { border: `1px solid ${TOKENS.line}`, borderRadius: 6, overflow: "hidden" } }, result.skipped.map((s, i) => /* @__PURE__ */ React.createElement("div", { key: i, style: { display: "flex", gap: 10, padding: "7px 10px", fontSize: 12.5, borderTop: i === 0 ? "none" : `1px solid ${TOKENS.line}`, background: i % 2 ? "#FAF8F1" : "transparent" } }, /* @__PURE__ */ React.createElement("span", { style: { color: TOKENS.ink3, whiteSpace: "nowrap" } }, s.rowNo, "\uD589"), /* @__PURE__ */ React.createElement("span", { style: { fontFamily: MONO, whiteSpace: "nowrap" } }, s.docNumber), /* @__PURE__ */ React.createElement("span", { style: { color: TOKENS.stamp } }, s.reason))))))), /* @__PURE__ */ React.createElement("div", { style: styles.modalFooter }, /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: onClose }, "\uD655\uC778"))));
   }
   function daysLeft(deletedAt) {
     const elapsedMs = Date.now() - new Date(deletedAt).getTime();
