@@ -280,8 +280,8 @@
     if (!nq) return true;
     return normHeader(p.name).includes(nq) || !!p.ctd && nq.includes("ctd");
   }
-  function CtdBadge() {
-    return /* @__PURE__ */ React.createElement("span", { title: "CTD \uC81C\uD488", style: { display: "inline-block", flexShrink: 0, marginLeft: 5, padding: "0 5px", borderRadius: 3, background: "#E6EEF7", color: "#1F4E79", fontSize: 10, fontWeight: 700, letterSpacing: 0.3, lineHeight: "16px", verticalAlign: "middle" } }, "CTD");
+  function CtdBadge({ large }) {
+    return /* @__PURE__ */ React.createElement("span", { title: "CTD \uC81C\uD488", style: { display: "inline-block", flexShrink: 0, marginLeft: large ? 10 : 5, padding: large ? "0 8px" : "0 5px", borderRadius: 3, background: "#E3F3E8", color: "#1E7B3E", border: "1px solid #B7DFC4", fontFamily: SANS, fontSize: large ? 13 : 10, fontWeight: 700, letterSpacing: 0.3, lineHeight: large ? "22px" : "15px", verticalAlign: "middle" } }, "CTD");
   }
   function thisMondayIso() {
     const d = /* @__PURE__ */ new Date();
@@ -323,6 +323,7 @@
     return ((_a = categories.find((c) => c.id === id)) == null ? void 0 : _a.name) || id;
   }
   function RevisionLedger() {
+    var _a;
     const [bootLoading, setBootLoading] = useState(true);
     const [me, setMe] = useState(null);
     const [saving, setSaving] = useState(false);
@@ -397,9 +398,9 @@
     const [collapseCompletedSignal, setCollapseCompletedSignal] = useState(0);
     const [focusMemoId, setFocusMemoId] = useState(null);
     useEffect(() => {
-      var _a, _b;
+      var _a2, _b;
       if (pendingPageRef.current) {
-        setPageProgress((_a = pendingPageRef.current.progress) != null ? _a : 1);
+        setPageProgress((_a2 = pendingPageRef.current.progress) != null ? _a2 : 1);
         setPageCompleted((_b = pendingPageRef.current.completed) != null ? _b : 1);
         pendingPageRef.current = null;
       } else {
@@ -755,7 +756,7 @@
       flash(ok ? "\uC81C\uD488\uBA85\uC774 \uBCC0\uACBD\uB418\uC5C8\uC2B5\uB2C8\uB2E4." : "\uC800\uC7A5 \uC911 \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4.");
     };
     const importProductsFromExcel = async (file) => {
-      var _a, _b, _c, _d;
+      var _a2, _b, _c, _d;
       try {
         const buf = await file.arrayBuffer();
         const wb = XLSX.read(buf, { type: "array" });
@@ -766,7 +767,7 @@
         let nextProducts = [...products];
         let added = 0, skipped = 0;
         for (const row of rows) {
-          const catName2 = String((_a = row["\uC81C\uD615"]) != null ? _a : "").trim();
+          const catName2 = String((_a2 = row["\uC81C\uD615"]) != null ? _a2 : "").trim();
           const subName = String((_b = row["\uBB38\uC11C\uD568"]) != null ? _b : "").trim();
           const prodName = String((_c = row["\uC81C\uD488\uBA85"]) != null ? _c : "").trim();
           if (!catName2) {
@@ -808,16 +809,16 @@
       }
     };
     const canManageRequest = (req) => {
-      var _a;
-      return me.isAdmin || ((_a = req.requestedBy) == null ? void 0 : _a.empId) === me.empId;
+      var _a2;
+      return me.isAdmin || ((_a2 = req.requestedBy) == null ? void 0 : _a2.empId) === me.empId;
     };
     const canManageChange = (change) => {
-      var _a;
-      return me.isAdmin || ((_a = change.registrant) == null ? void 0 : _a.empId) === me.empId;
+      var _a2;
+      return me.isAdmin || ((_a2 = change.registrant) == null ? void 0 : _a2.empId) === me.empId;
     };
     const editRequestsFor = (changeId) => requests.filter((r) => r.type === "editChange" && r.changeId === changeId);
     const proposeChangeEdit = async (change, form) => {
-      var _a;
+      var _a2;
       const req = {
         id: uid(),
         type: "editChange",
@@ -832,12 +833,12 @@
       setProposingChange(null);
       const ok = await persist({ requests: next });
       flash(ok ? "\uC218\uC815 \uC81C\uC548\uC744 \uB4F1\uB85D\uC790\uC5D0\uAC8C \uBCF4\uB0C8\uC2B5\uB2C8\uB2E4. \uB4F1\uB85D\uC790\uAC00 \uC2B9\uC778\uD558\uBA74 \uBC18\uC601\uB429\uB2C8\uB2E4." : "\uC800\uC7A5 \uC911 \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4.");
-      if (ok && ((_a = change.registrant) == null ? void 0 : _a.empId) && change.registrant.empId !== me.empId) {
+      if (ok && ((_a2 = change.registrant) == null ? void 0 : _a2.empId) && change.registrant.empId !== me.empId) {
         pushAlarms([change.registrant.empId], `${me.name}\uB2D8\uC774 \uBCC0\uACBD(\uBB38\uC11C\uBC88\uD638: ${change.docNumber})\uC758 \uC218\uC815\uC744 \uC81C\uC548\uD588\uC2B5\uB2C8\uB2E4.`, { type: "mytask", changeId: change.id });
       }
     };
     const approveChangeEdit = async (req) => {
-      var _a, _b;
+      var _a2, _b;
       const target = changes.find((c) => c.id === req.changeId);
       if (!target) {
         flash("\uC6D0\uBCF8 \uBCC0\uACBD\uC744 \uCC3E\uC744 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4.");
@@ -853,13 +854,13 @@
       setRequests(nextRequests);
       await persist({ requests: nextRequests });
       flash(ok ? "\uC218\uC815 \uC81C\uC548\uC744 \uC2B9\uC778\uD588\uC2B5\uB2C8\uB2E4." : "\uC800\uC7A5 \uC911 \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4.");
-      if (ok && ((_a = req.requestedBy) == null ? void 0 : _a.empId) !== me.empId) {
+      if (ok && ((_a2 = req.requestedBy) == null ? void 0 : _a2.empId) !== me.empId) {
         pushAlarms([(_b = req.requestedBy) == null ? void 0 : _b.empId], `\uC81C\uC548\uD558\uC2E0 \uBCC0\uACBD(\uBB38\uC11C\uBC88\uD638: ${req.changeDocNumber}) \uC218\uC815\uC774 \uC2B9\uC778\uB418\uC5C8\uC2B5\uB2C8\uB2E4.`, { type: "mytask", changeId: req.changeId });
       }
     };
     const rejectChangeEdit = async (req) => {
-      var _a, _b, _c;
-      const confirmed = await askConfirm(`${(_a = req.requestedBy) == null ? void 0 : _a.name}\uB2D8\uC758 \uC218\uC815 \uC81C\uC548\uC744
+      var _a2, _b, _c;
+      const confirmed = await askConfirm(`${(_a2 = req.requestedBy) == null ? void 0 : _a2.name}\uB2D8\uC758 \uC218\uC815 \uC81C\uC548\uC744
 \uAC70\uC808\uD558\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?`);
       if (!confirmed) return;
       const nextRequests = requests.filter((r) => r.id !== req.id);
@@ -947,7 +948,7 @@
       await persist({ trash: next });
     };
     const restoreTrashItem = async (trashId) => {
-      var _a;
+      var _a2;
       const confirmed = await askConfirm("\uC815\uB9D0 \uBCF5\uAD6C\uB97C \uC9C4\uD589\uD558\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?");
       if (!confirmed) return;
       const item = trash.find((t) => t.trashId === trashId);
@@ -970,8 +971,8 @@
         await persist({ products: next });
       } else if (item.type === "memo") {
         const parent = changes.find((c) => {
-          var _a2;
-          return c.id === ((_a2 = item.meta) == null ? void 0 : _a2.changeId);
+          var _a3;
+          return c.id === ((_a3 = item.meta) == null ? void 0 : _a3.changeId);
         });
         if (!parent) {
           flash("\uC6D0\uBCF8 \uBCC0\uACBD\uC774 \uC0AD\uC81C\uB418\uC5B4 \uBA54\uBAA8\uB97C \uBCF5\uAD6C\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4.");
@@ -982,12 +983,12 @@
         await persist({ changes: next });
       } else if (item.type === "reply") {
         const parent = changes.find((c) => {
-          var _a2;
-          return c.id === ((_a2 = item.meta) == null ? void 0 : _a2.changeId);
+          var _a3;
+          return c.id === ((_a3 = item.meta) == null ? void 0 : _a3.changeId);
         });
-        const parentMemo = (_a = parent == null ? void 0 : parent.memos) == null ? void 0 : _a.find((m) => {
-          var _a2;
-          return m.id === ((_a2 = item.meta) == null ? void 0 : _a2.memoId);
+        const parentMemo = (_a2 = parent == null ? void 0 : parent.memos) == null ? void 0 : _a2.find((m) => {
+          var _a3;
+          return m.id === ((_a3 = item.meta) == null ? void 0 : _a3.memoId);
         });
         if (!parent || !parentMemo) {
           flash("\uC6D0\uBCF8 \uBA54\uBAA8\uAC00 \uC0AD\uC81C\uB418\uC5B4 \uB2F5\uC7A5\uC744 \uBCF5\uAD6C\uD560 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4.");
@@ -1033,13 +1034,13 @@
       setSelection({ type: "all" });
     };
     const openAlarm = (alarm) => {
-      var _a, _b, _c, _d, _e;
+      var _a2, _b, _c, _d, _e;
       if (!alarm.read) {
         const next = alarms.map((a) => a.id === alarm.id ? { ...a, read: true } : a);
         setAlarms(next);
         persist({ alarms: next });
       }
-      if (((_a = alarm.nav) == null ? void 0 : _a.type) === "category") {
+      if (((_a2 = alarm.nav) == null ? void 0 : _a2.type) === "category") {
         setSelection({ type: "category", categoryId: alarm.nav.categoryId });
         setExpandedCategories((s) => ({ ...s, [alarm.nav.categoryId]: true }));
       } else if (((_b = alarm.nav) == null ? void 0 : _b.type) === "product") {
@@ -1050,8 +1051,8 @@
           if (target) {
             const done = statusOf(target, products).allDone;
             const myChanges = changes.filter((c) => {
-              var _a2;
-              return ((_a2 = c.registrant) == null ? void 0 : _a2.empId) === me.empId;
+              var _a3;
+              return ((_a3 = c.registrant) == null ? void 0 : _a3.empId) === me.empId;
             });
             const sameStatusList = myChanges.filter((c) => statusOf(c, products).allDone === done);
             const idx = sameStatusList.findIndex((c) => c.id === target.id);
@@ -1126,7 +1127,7 @@
       }
     };
     const approveRequest = async (req) => {
-      var _a, _b;
+      var _a2, _b;
       let nextProducts = products;
       let newProductId = null;
       if (req.type === "add") {
@@ -1134,7 +1135,7 @@
         nextProducts = [...products, { id: newProductId, name: req.name, categoryId: req.categoryId }];
       } else if (req.type === "delete") {
         const target = products.find((p) => p.id === req.productId);
-        if (target) await pushTrash("product", target, null, (_a = req.requestedBy) == null ? void 0 : _a.empId);
+        if (target) await pushTrash("product", target, null, (_a2 = req.requestedBy) == null ? void 0 : _a2.empId);
         nextProducts = products.filter((p) => p.id !== req.productId);
       }
       const nextRequests = requests.filter((r) => r.id !== req.id);
@@ -1148,14 +1149,14 @@
       pushAlarms([(_b = req.requestedBy) == null ? void 0 : _b.empId], `${label} \uC81C\uD488 ${action} \uC694\uCCAD\uC774 \uC2B9\uC778\uB418\uC5C8\uC2B5\uB2C8\uB2E4.`, nav);
     };
     const rejectRequest = async (req) => {
-      var _a;
+      var _a2;
       const nextRequests = requests.filter((r) => r.id !== req.id);
       setRequests(nextRequests);
       const ok = await persist({ requests: nextRequests });
       flash(ok ? "\uC694\uCCAD\uC744 \uAC70\uBD80\uD588\uC2B5\uB2C8\uB2E4." : "\uC800\uC7A5 \uC911 \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4.");
       const label = req.type === "add" ? `'${req.name}'` : `'${req.productName}'`;
       const action = req.type === "add" ? "\uCD94\uAC00" : "\uC0AD\uC81C";
-      pushAlarms([(_a = req.requestedBy) == null ? void 0 : _a.empId], `${label} \uC81C\uD488 ${action} \uC694\uCCAD\uC774 \uAC70\uC808\uB418\uC5C8\uC2B5\uB2C8\uB2E4.`, { type: "category", categoryId: req.categoryId });
+      pushAlarms([(_a2 = req.requestedBy) == null ? void 0 : _a2.empId], `${label} \uC81C\uD488 ${action} \uC694\uCCAD\uC774 \uAC70\uC808\uB418\uC5C8\uC2B5\uB2C8\uB2E4.`, { type: "category", categoryId: req.categoryId });
     };
     const saveRequestEdit = async (reqId) => {
       const name = editingRequestName.trim();
@@ -1234,7 +1235,7 @@
       flash(ok ? "\uC0AD\uC81C\uB418\uC5C8\uC2B5\uB2C8\uB2E4. (\uD734\uC9C0\uD1B5\uC5D0\uC11C 7\uC77C\uAC04 \uBCF5\uAD6C \uAC00\uB2A5)" : "\uC800\uC7A5 \uC911 \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4.");
     };
     const setCompletion = async (changeId, productId, payload) => {
-      var _a;
+      var _a2;
       const prevChange = changes.find((c) => c.id === changeId);
       const wasDone = prevChange ? statusOf(prevChange, products).allDone : false;
       const next = changes.map((c) => {
@@ -1252,7 +1253,7 @@
       }
       const updated = next.find((c) => c.id === changeId);
       const nowDone = updated ? statusOf(updated, products).allDone : false;
-      if (!wasDone && nowDone && ((_a = updated.registrant) == null ? void 0 : _a.empId) && updated.registrant.empId !== me.empId) {
+      if (!wasDone && nowDone && ((_a2 = updated.registrant) == null ? void 0 : _a2.empId) && updated.registrant.empId !== me.empId) {
         pushAlarms([updated.registrant.empId], `\uB4F1\uB85D\uD558\uC2E0 \uBCC0\uACBD(\uBB38\uC11C\uBC88\uD638: ${updated.docNumber})\uC758 \uBAA8\uB4E0 \uC81C\uD488 \uBC18\uC601\uC774 \uC644\uB8CC\uB418\uC5C8\uC2B5\uB2C8\uB2E4.`, { type: "mytask", changeId: updated.id });
       }
     };
@@ -1464,8 +1465,8 @@
         const idField = idFieldOf(kind);
         const base = Date.now();
         const arr = kind === "change" || kind === "archived" ? arrRaw.map((c, i) => {
-          var _a;
-          return { ...c, createdTs: (_a = c.createdTs) != null ? _a : base - i };
+          var _a2;
+          return { ...c, createdTs: (_a2 = c.createdTs) != null ? _a2 : base - i };
         }) : arrRaw;
         const existing = await listKind(kind);
         const keep = new Set(arr.map((x) => x[idField]));
@@ -1511,8 +1512,8 @@
         ...c,
         archivedAt: dotFormat(isoToday()),
         productNames: Object.fromEntries(c.productIds.map((id) => {
-          var _a;
-          return [id, (_a = products.find((p) => p.id === id)) == null ? void 0 : _a.name];
+          var _a2;
+          return [id, (_a2 = products.find((p) => p.id === id)) == null ? void 0 : _a2.name];
         }).filter(([, n]) => n))
       }));
       const results = await runLimited(records.map((r) => () => putKind("archived", r.id, r)));
@@ -1575,11 +1576,11 @@
       const header = ["\uBCC0\uACBD\uBB38\uC11C\uBC88\uD638", "\uBCC0\uACBD\uBA85", "\uBCC0\uACBD \uB0B4\uC6A9", "\uD2B9\uC774\uC0AC\uD56D", "\uC644\uB8CC\uC608\uC815\uC77C", "\uAD00\uB828\uC81C\uD488", "\uB4F1\uB85D\uC790\uC0AC\uBC88", "\uB4F1\uB85D\uC790", "\uB4F1\uB85D\uC77C", "\uC81C\uD488\uBCC4 \uC644\uB8CC\uD604\uD669", "\uC81C\uD488ID"];
       const aoa = [header];
       list.forEach((c) => {
-        var _a, _b;
+        var _a2, _b;
         const prods = (c.productIds || []).map((id) => products.find((p) => p.id === id)).filter(Boolean);
         const comp = prods.filter((p) => {
-          var _a2;
-          return (_a2 = c.completions) == null ? void 0 : _a2[p.id];
+          var _a3;
+          return (_a3 = c.completions) == null ? void 0 : _a3[p.id];
         }).map((p) => `${p.name} | ${c.completions[p.id].revNo || ""} | ${c.completions[p.id].date || ""}`).join("\n");
         aoa.push([
           c.docNumber || "",
@@ -1588,7 +1589,7 @@
           c.noteText || "",
           c.dueDate || "",
           prods.map((p) => p.name).join(", "),
-          ((_a = c.registrant) == null ? void 0 : _a.empId) || "",
+          ((_a2 = c.registrant) == null ? void 0 : _a2.empId) || "",
           ((_b = c.registrant) == null ? void 0 : _b.name) || "",
           c.createdAt || "",
           comp,
@@ -1613,7 +1614,7 @@
       flash(`\uBCC0\uACBD ${list.length}\uAC74\uC744 \uC5D1\uC140\uB85C \uB0B4\uB824\uBC1B\uC558\uC2B5\uB2C8\uB2E4.`);
     };
     const importChangesFromExcel = async (file) => {
-      var _a, _b, _c;
+      var _a2, _b, _c;
       setImportingChanges(true);
       try {
         const buf = await file.arrayBuffer();
@@ -1624,7 +1625,7 @@
         });
         let found = null;
         for (let i = 0; i < wb.SheetNames.length && !found; i++) {
-          if ((_c = (_b = (_a = wb.Workbook) == null ? void 0 : _a.Sheets) == null ? void 0 : _b[i]) == null ? void 0 : _c.Hidden) continue;
+          if ((_c = (_b = (_a2 = wb.Workbook) == null ? void 0 : _a2.Sheets) == null ? void 0 : _b[i]) == null ? void 0 : _c.Hidden) continue;
           const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[i]], { header: 1, defval: "", raw: true });
           for (let r = 0; r < Math.min(rows.length, 15); r++) {
             const cols = {};
@@ -1745,8 +1746,8 @@
       }
     };
     const handleChangeImportPick = async (e) => {
-      var _a;
-      const f = (_a = e.target.files) == null ? void 0 : _a[0];
+      var _a2;
+      const f = (_a2 = e.target.files) == null ? void 0 : _a2[0];
       e.target.value = "";
       if (f) await importChangesFromExcel(f);
     };
@@ -1758,8 +1759,8 @@
         const completions = {};
         (row.completionList || []).forEach((cl) => {
           const pid = productIds.find((id) => {
-            var _a;
-            return normHeader((_a = products.find((p) => p.id === id)) == null ? void 0 : _a.name) === normHeader(cl.name);
+            var _a2;
+            return normHeader((_a2 = products.find((p) => p.id === id)) == null ? void 0 : _a2.name) === normHeader(cl.name);
           });
           if (pid) completions[pid] = { date: cl.date.value, revNo: cl.revNo || "" };
         });
@@ -1802,8 +1803,8 @@
         added: records.length,
         skipped,
         addedRows: records.map((rec) => ({ docNumber: rec.docNumber, changeName: rec.changeName, productNames: rec.productIds.map((id) => {
-          var _a;
-          return (_a = products.find((p) => p.id === id)) == null ? void 0 : _a.name;
+          var _a2;
+          return (_a2 = products.find((p) => p.id === id)) == null ? void 0 : _a2.name;
         }).filter(Boolean) }))
       });
     };
@@ -1815,7 +1816,7 @@
       return Array.from(set);
     };
     const addMemo = async (changeId, text, taggedEmpIds = [], taggedTeamIds = []) => {
-      var _a;
+      var _a2;
       const memo = { id: uid(), authorEmpId: me.empId, authorName: me.name, text, createdAt: dotFormat(isoToday()), replies: [], taggedEmpIds, taggedTeamIds };
       const next = changes.map((c) => c.id === changeId ? { ...c, memos: [...c.memos || [], memo] } : c);
       setChanges(next);
@@ -1829,7 +1830,7 @@
       if (recipients.length > 0 && target) {
         pushAlarms(recipients, `${me.name}\uB2D8\uC774 \uBA54\uBAA8\uC5D0\uC11C \uD68C\uC6D0\uB2D8\uC744 \uD0DC\uADF8\uD588\uC2B5\uB2C8\uB2E4. (\uBB38\uC11C\uBC88\uD638: ${target.docNumber})`, { type: "memo", changeId, memoId: memo.id });
       }
-      const ownerId = (_a = target == null ? void 0 : target.registrant) == null ? void 0 : _a.empId;
+      const ownerId = (_a2 = target == null ? void 0 : target.registrant) == null ? void 0 : _a2.empId;
       if (ownerId && ownerId !== me.empId && !recipients.includes(ownerId)) {
         pushAlarms([ownerId], `${me.name}\uB2D8\uC774 \uB4F1\uB85D\uD558\uC2E0 \uBCC0\uACBD(\uBB38\uC11C\uBC88\uD638: ${target.docNumber})\uC5D0 \uBA54\uBAA8\uB97C \uB0A8\uACBC\uC2B5\uB2C8\uB2E4.`, { type: "memo", changeId, memoId: memo.id });
       }
@@ -1841,11 +1842,11 @@
       if (!ok) flash("\uC800\uC7A5 \uC911 \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4.");
     };
     const deleteMemo = async (changeId, memoId) => {
-      var _a;
+      var _a2;
       const confirmed = await askConfirm("\uD574\uB2F9 \uBA54\uBAA8\uB97C\n\uC815\uB9D0 \uC0AD\uC81C\uD558\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?");
       if (!confirmed) return;
       const parent = changes.find((c) => c.id === changeId);
-      const memo = (_a = parent == null ? void 0 : parent.memos) == null ? void 0 : _a.find((m) => m.id === memoId);
+      const memo = (_a2 = parent == null ? void 0 : parent.memos) == null ? void 0 : _a2.find((m) => m.id === memoId);
       if (memo) await pushTrash("memo", memo, { changeId });
       const next = changes.map((c) => c.id !== changeId ? c : { ...c, memos: c.memos.filter((m) => m.id !== memoId) });
       setChanges(next);
@@ -1853,7 +1854,7 @@
       flash(ok ? "\uC0AD\uC81C\uB418\uC5C8\uC2B5\uB2C8\uB2E4. (\uD734\uC9C0\uD1B5\uC5D0\uC11C 7\uC77C\uAC04 \uBCF5\uAD6C \uAC00\uB2A5)" : "\uC800\uC7A5 \uC911 \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4.");
     };
     const addReply = async (changeId, memoId, text, taggedEmpIds = [], taggedTeamIds = []) => {
-      var _a;
+      var _a2;
       const reply = { id: uid(), authorEmpId: me.empId, authorName: me.name, text, createdAt: dotFormat(isoToday()), taggedEmpIds, taggedTeamIds };
       const next = changes.map((c) => c.id !== changeId ? c : { ...c, memos: c.memos.map((m) => m.id === memoId ? { ...m, replies: [...m.replies || [], reply] } : m) });
       setChanges(next);
@@ -1867,7 +1868,7 @@
       if (recipients.length > 0 && target) {
         pushAlarms(recipients, `${me.name}\uB2D8\uC774 \uB2F5\uC7A5\uC5D0\uC11C \uD68C\uC6D0\uB2D8\uC744 \uD0DC\uADF8\uD588\uC2B5\uB2C8\uB2E4. (\uBB38\uC11C\uBC88\uD638: ${target.docNumber})`, { type: "memo", changeId, memoId });
       }
-      const ownerId = (_a = target == null ? void 0 : target.registrant) == null ? void 0 : _a.empId;
+      const ownerId = (_a2 = target == null ? void 0 : target.registrant) == null ? void 0 : _a2.empId;
       if (ownerId && ownerId !== me.empId && !recipients.includes(ownerId)) {
         pushAlarms([ownerId], `${me.name}\uB2D8\uC774 \uB4F1\uB85D\uD558\uC2E0 \uBCC0\uACBD(\uBB38\uC11C\uBC88\uD638: ${target.docNumber})\uC758 \uBA54\uBAA8\uC5D0 \uB2F5\uC7A5\uC744 \uB0A8\uACBC\uC2B5\uB2C8\uB2E4.`, { type: "memo", changeId, memoId });
       }
@@ -1879,11 +1880,11 @@
       if (!ok) flash("\uC800\uC7A5 \uC911 \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4.");
     };
     const deleteReply = async (changeId, memoId, replyId) => {
-      var _a, _b;
+      var _a2, _b;
       const confirmed = await askConfirm("\uD574\uB2F9 \uB2F5\uC7A5\uC744\n\uC815\uB9D0 \uC0AD\uC81C\uD558\uC2DC\uACA0\uC2B5\uB2C8\uAE4C?");
       if (!confirmed) return;
       const parent = changes.find((c) => c.id === changeId);
-      const memo = (_a = parent == null ? void 0 : parent.memos) == null ? void 0 : _a.find((m) => m.id === memoId);
+      const memo = (_a2 = parent == null ? void 0 : parent.memos) == null ? void 0 : _a2.find((m) => m.id === memoId);
       const reply = (_b = memo == null ? void 0 : memo.replies) == null ? void 0 : _b.find((r) => r.id === replyId);
       if (reply) await pushTrash("reply", reply, { changeId, memoId });
       const next = changes.map((c) => c.id !== changeId ? c : { ...c, memos: c.memos.map((m) => m.id !== memoId ? m : { ...m, replies: (m.replies || []).filter((r) => r.id !== replyId) }) });
@@ -1959,23 +1960,23 @@
     } else if (selection.type === "mytask") {
       mainTitle = tabLabels.mytask;
       scopedChanges = changes.filter((c) => {
-        var _a;
-        return ((_a = c.registrant) == null ? void 0 : _a.empId) === me.empId;
+        var _a2;
+        return ((_a2 = c.registrant) == null ? void 0 : _a2.empId) === me.empId;
       });
       groupByStatus = true;
     } else if (selection.type === "viewUser") {
       const targetUser = users.find((u) => u.empId === selection.targetEmpId);
       mainTitle = targetUser ? `${targetUser.name}\uB2D8\uC758 \uAC1C\uC778\uBCC4 \uBCC0\uACBD \uC774\uB825` : "\uAC1C\uC778\uBCC4 \uBCC0\uACBD \uC774\uB825 \uC870\uD68C";
       scopedChanges = selection.targetEmpId ? changes.filter((c) => {
-        var _a;
-        return ((_a = c.registrant) == null ? void 0 : _a.empId) === selection.targetEmpId;
+        var _a2;
+        return ((_a2 = c.registrant) == null ? void 0 : _a2.empId) === selection.targetEmpId;
       }) : [];
       groupByStatus = true;
     } else if (selection.type === "all") {
       groupByStatus = true;
     }
     const visibleChanges = docSearch.trim() ? scopedChanges.filter((c) => {
-      var _a, _b, _c;
+      var _a2, _b, _c;
       const q = normHeader(docSearch);
       const match = (text) => normHeader(text || "").includes(q);
       const memoMatch = (c.memos || []).some(
@@ -1985,7 +1986,7 @@
       if (searchScope === "name") return match(c.changeName);
       if (searchScope === "content") return match(c.historyText) || match(c.noteText);
       if (searchScope === "memo") return memoMatch;
-      if (searchScope === "registrant") return match((_a = c.registrant) == null ? void 0 : _a.name);
+      if (searchScope === "registrant") return match((_a2 = c.registrant) == null ? void 0 : _a2.name);
       return match(c.docNumber) || match(c.changeName) || match(c.historyText) || match(c.noteText) || match((_b = c.registrant) == null ? void 0 : _b.name) || match((_c = c.attachment) == null ? void 0 : _c.fileName) || memoMatch;
     }) : scopedChanges;
     const isDoneForView = (c) => selection.type === "product" ? !!c.completions[selection.productId] : statusOf(c, products).allDone;
@@ -2048,8 +2049,8 @@
       /* @__PURE__ */ React.createElement("img", { src: LOGO_DATA_URI, alt: "\uD55C\uB9BC\uC81C\uC57D", style: styles.headerLogo }),
       /* @__PURE__ */ React.createElement("span", { style: styles.title }, "\uC81C\uD488\uD45C\uC900\uC11C \uAC1C\uC815 \uAD00\uB9AC\uB300\uC7A5")
     ), /* @__PURE__ */ React.createElement("div", { style: styles.headerSub }, "\uBCC0\uACBD \uB4F1\uB85D \uC2DC \uAD00\uB828 \uC81C\uD488\uC758 \uAC1C\uC815 \uC774\uB825\uC5D0 \uC790\uB3D9 \uBC18\uC601\uB429\uB2C8\uB2E4")), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 14 } }, /* @__PURE__ */ React.createElement("div", { style: styles.meBox }, /* @__PURE__ */ React.createElement("span", { style: styles.meName }, me.name), /* @__PURE__ */ React.createElement("span", { style: styles.meId }, me.empId, " \xB7 ", teamName(teams, me.team), me.isAdmin ? " \xB7 \uAD00\uB9AC\uC790" : ""), /* @__PURE__ */ React.createElement("span", { style: styles.switchLink, onClick: () => setShowPwModal(true) }, "\uBE44\uBC00\uBC88\uD638 \uBCC0\uACBD"), /* @__PURE__ */ React.createElement("span", { style: styles.switchLink, onClick: logout }, "\uB85C\uADF8\uC544\uC6C3")), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: () => setShowForm(true) }, "\uBCC0\uACBD \uB4F1\uB85D"))), /* @__PURE__ */ React.createElement("nav", { style: styles.topNav }, /* @__PURE__ */ React.createElement("button", { style: { ...styles.navBtn, ...selection.type === "mytask" ? styles.navBtnActive : {} }, onClick: () => setSelection({ type: "mytask" }) }, tabLabels.mytask, " ", /* @__PURE__ */ React.createElement("span", { style: styles.navCount }, changes.filter((c) => {
-      var _a;
-      return ((_a = c.registrant) == null ? void 0 : _a.empId) === me.empId;
+      var _a2;
+      return ((_a2 = c.registrant) == null ? void 0 : _a2.empId) === me.empId;
     }).length)), /* @__PURE__ */ React.createElement("button", { style: { ...styles.navBtn, ...selection.type === "all" ? styles.navBtnActive : {} }, onClick: () => setSelection({ type: "all" }) }, tabLabels.all, " ", /* @__PURE__ */ React.createElement("span", { style: styles.navCount }, changes.length)), /* @__PURE__ */ React.createElement("button", { style: { ...styles.navBtn, ...selection.type === "users" ? styles.navBtnActive : {} }, onClick: () => setSelection({ type: "users" }) }, tabLabels.users, " ", /* @__PURE__ */ React.createElement("span", { style: styles.navCount }, users.length)), /* @__PURE__ */ React.createElement("button", { style: { ...styles.navBtn, ...selection.type === "viewUser" ? styles.navBtnActive : {} }, onClick: () => setSelection({ type: "viewUser", targetEmpId: selection.targetEmpId || null }) }, "\uAC1C\uC778\uBCC4 \uBCC0\uACBD \uC774\uB825 \uC870\uD68C"), customTabs.map((tab) => /* @__PURE__ */ React.createElement("button", { key: tab.id, style: { ...styles.navBtn, ...selection.type === "customtab" && selection.tabId === tab.id ? styles.navBtnActive : {} }, onClick: () => setSelection({ type: "customtab", tabId: tab.id }) }, tab.label)), /* @__PURE__ */ React.createElement("button", { style: { ...styles.navBtn, ...selection.type === "notices" ? styles.navBtnActive : {} }, onClick: () => setSelection({ type: "notices" }) }, "\uACF5\uC9C0\uC0AC\uD56D ", /* @__PURE__ */ React.createElement("span", { style: styles.navCount }, notices.length)), me.isAdmin && /* @__PURE__ */ React.createElement("button", { style: { ...styles.navBtn, ...selection.type === "admin" ? styles.navBtnActive : {} }, onClick: () => setSelection({ type: "admin" }) }, tabLabels.admin, requests.length + signups.length > 0 && /* @__PURE__ */ React.createElement("span", { style: styles.navCountAlert }, requests.length + signups.length)), /* @__PURE__ */ React.createElement("button", { style: { ...styles.navBtn, ...selection.type === "alarms" ? styles.navBtnActive : {} }, onClick: () => setSelection({ type: "alarms" }) }, "\uC54C\uB78C", myUnreadAlarms.length > 0 && /* @__PURE__ */ React.createElement("span", { style: styles.navCountAlert }, myUnreadAlarms.length)), /* @__PURE__ */ React.createElement("button", { style: { ...styles.navBtn, ...selection.type === "trash" ? styles.navBtnActive : {} }, onClick: () => setSelection({ type: "trash" }) }, "\uB0B4 \uD734\uC9C0\uD1B5", myTrash.length > 0 && /* @__PURE__ */ React.createElement("span", { style: styles.navCount }, myTrash.length)), /* @__PURE__ */ React.createElement("button", { style: { ...styles.navBtn, ...selection.type === "archive" ? styles.navBtnActive : {} }, onClick: () => setSelection({ type: "archive" }) }, "\uBCF4\uAD00\uD568"), me.isAdmin && /* @__PURE__ */ React.createElement("button", { style: styles.navEditBtn, onClick: () => setShowLabelsModal(true), title: "\uD0ED \uAD00\uB9AC" }, "\u270E \uD0ED \uAD00\uB9AC")), /* @__PURE__ */ React.createElement("div", { style: styles.bodyRow }, /* @__PURE__ */ React.createElement("aside", { style: { ...styles.sidebar, width: sidebarWidth, position: "relative" } }, /* @__PURE__ */ React.createElement(
       "div",
       {
@@ -2202,12 +2203,12 @@
         onAddUserDirect: addUserDirect,
         onViewUser: (empId) => setSelection({ type: "viewUser", targetEmpId: empId })
       }
-    ) : selection.type === "archive" ? /* @__PURE__ */ React.createElement(ArchivePanel, { archived, isAdmin: me.isAdmin, onRestore: restoreArchivedChange, onDownloadFile: downloadMemoFile }) : selection.type === "notices" ? /* @__PURE__ */ React.createElement(NoticesPanel, { notices, isAdmin: me.isAdmin, onAdd: addNotice, onUpdate: updateNotice, onDelete: deleteNotice, onUploadFile: uploadMemoFile, onDownloadFile: downloadMemoFile }) : selection.type === "alarms" ? /* @__PURE__ */ React.createElement(AlarmsPanel, { alarms: myAlarms, onNavigate: openAlarm, onMarkRead: markAlarmRead, onDelete: deleteAlarm, onClearRead: clearReadAlarms }) : selection.type === "trash" ? /* @__PURE__ */ React.createElement(TrashPanel, { trash: myTrash, products, categories, onRestore: restoreTrashItem, onPermanentDelete: permanentlyDeleteTrashItem }) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: styles.mainHeaderRow }, /* @__PURE__ */ React.createElement("h2", { style: styles.mainTitle }, mainTitle), /* @__PURE__ */ React.createElement("span", { style: styles.mainCount }, visibleChanges.length, "\uAC74"), /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }), (selection.type === "all" || selection.type === "mytask" || selection.type === "viewUser" && selection.targetEmpId) && /* @__PURE__ */ React.createElement("button", { style: { ...styles.smallGhostBtn, marginRight: 8 }, onClick: () => {
-      var _a;
-      return exportChangesToExcel(scopedChanges, selection.type === "all" ? "\uC804\uCCB4" : selection.type === "mytask" ? me.name : ((_a = users.find((u) => u.empId === selection.targetEmpId)) == null ? void 0 : _a.name) || "\uAC1C\uC778");
+    ) : selection.type === "archive" ? /* @__PURE__ */ React.createElement(ArchivePanel, { archived, isAdmin: me.isAdmin, onRestore: restoreArchivedChange, onDownloadFile: downloadMemoFile }) : selection.type === "notices" ? /* @__PURE__ */ React.createElement(NoticesPanel, { notices, isAdmin: me.isAdmin, onAdd: addNotice, onUpdate: updateNotice, onDelete: deleteNotice, onUploadFile: uploadMemoFile, onDownloadFile: downloadMemoFile }) : selection.type === "alarms" ? /* @__PURE__ */ React.createElement(AlarmsPanel, { alarms: myAlarms, onNavigate: openAlarm, onMarkRead: markAlarmRead, onDelete: deleteAlarm, onClearRead: clearReadAlarms }) : selection.type === "trash" ? /* @__PURE__ */ React.createElement(TrashPanel, { trash: myTrash, products, categories, onRestore: restoreTrashItem, onPermanentDelete: permanentlyDeleteTrashItem }) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: styles.mainHeaderRow }, /* @__PURE__ */ React.createElement("h2", { style: styles.mainTitle }, mainTitle, selection.type === "product" && ((_a = products.find((x) => x.id === selection.productId)) == null ? void 0 : _a.ctd) && /* @__PURE__ */ React.createElement(CtdBadge, { large: true })), /* @__PURE__ */ React.createElement("span", { style: styles.mainCount }, visibleChanges.length, "\uAC74"), /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }), (selection.type === "all" || selection.type === "mytask" || selection.type === "viewUser" && selection.targetEmpId) && /* @__PURE__ */ React.createElement("button", { style: { ...styles.smallGhostBtn, marginRight: 8 }, onClick: () => {
+      var _a2;
+      return exportChangesToExcel(scopedChanges, selection.type === "all" ? "\uC804\uCCB4" : selection.type === "mytask" ? me.name : ((_a2 = users.find((u) => u.empId === selection.targetEmpId)) == null ? void 0 : _a2.name) || "\uAC1C\uC778");
     } }, "\u{1F4E4} \uBCC0\uACBD \uC804\uCCB4 \uC5D1\uC140 \uB2E4\uC6B4\uB85C\uB4DC"), selection.type === "mytask" && /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 6, marginRight: 8 } }, /* @__PURE__ */ React.createElement("input", { ref: changeImportRef, type: "file", accept: ".xlsx,.xls", style: { display: "none" }, onChange: handleChangeImportPick }), /* @__PURE__ */ React.createElement("button", { style: styles.smallGhostBtn, onClick: downloadChangeTemplate }, "\uBCC0\uACBD \uC77C\uAD04 \uB4F1\uB85D \uC591\uC2DD \uB2E4\uC6B4\uB85C\uB4DC"), /* @__PURE__ */ React.createElement("button", { style: styles.smallGhostBtn, disabled: importingChanges, onClick: () => {
-      var _a;
-      return (_a = changeImportRef.current) == null ? void 0 : _a.click();
+      var _a2;
+      return (_a2 = changeImportRef.current) == null ? void 0 : _a2.click();
     } }, importingChanges ? "\uB4F1\uB85D \uC911\u2026" : "\u{1F4E5} \uC5D1\uC140\uB85C \uBCC0\uACBD \uC77C\uAD04 \uB4F1\uB85D")), selection.type === "viewUser" && /* @__PURE__ */ React.createElement(
       "select",
       {
@@ -2238,8 +2239,8 @@
         teams,
         initial: editingChange || proposingChange,
         takenDocNumbers: /* @__PURE__ */ new Set([...changes.filter((c) => {
-          var _a;
-          return c.id !== ((_a = editingChange || proposingChange) == null ? void 0 : _a.id);
+          var _a2;
+          return c.id !== ((_a2 = editingChange || proposingChange) == null ? void 0 : _a2.id);
         }).map((c) => normDoc(c.docNumber)), ...(archived || []).map((r) => normDoc(r.docNumber))]),
         defaultProductId: !editingChange && !proposingChange && selection.type === "product" ? selection.productId : null,
         proposalMode: !!proposingChange,
