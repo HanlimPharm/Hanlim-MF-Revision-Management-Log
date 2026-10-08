@@ -64,6 +64,7 @@
   const MIGRATION_KEY = "revledger:migration:perdoc:v1";
   const TRASH_RETENTION_DAYS = 7;
   const SESSION_KEY = "revledger:session:v5";
+  const BACKUP_REMIND_KEY = "revledger:backupRemind:v1";
   const DEFAULT_LABELS = {
     all: "\uC804\uCCB4 \uBCC0\uACBD \uC774\uB825",
     mytask: "\uAC1C\uC778\uBCC4 \uBCC0\uACBD \uC774\uB825",
@@ -268,6 +269,20 @@
       reader.readAsDataURL(file);
     });
   }
+  function matchProductSearch(p, q) {
+    const nq = normHeader(q);
+    if (!nq) return true;
+    return normHeader(p.name).includes(nq) || !!p.ctd && nq.includes("ctd");
+  }
+  function CtdBadge() {
+    return /* @__PURE__ */ React.createElement("span", { title: "CTD \uC81C\uD488", style: { display: "inline-block", flexShrink: 0, marginLeft: 5, padding: "0 5px", borderRadius: 3, background: "#E6EEF7", color: "#1F4E79", fontSize: 10, fontWeight: 700, letterSpacing: 0.3, lineHeight: "16px", verticalAlign: "middle" } }, "CTD");
+  }
+  function thisMondayIso() {
+    const d = /* @__PURE__ */ new Date();
+    const diff = (d.getDay() + 6) % 7;
+    d.setDate(d.getDate() - diff);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
   function isoToday() {
     const d = /* @__PURE__ */ new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -330,6 +345,7 @@
     const [addingToCategory, setAddingToCategory] = useState(null);
     const [addingToSubcategory, setAddingToSubcategory] = useState(null);
     const [newProductName, setNewProductName] = useState("");
+    const [newProductCtd, setNewProductCtd] = useState(false);
     const [editingRequestId, setEditingRequestId] = useState(null);
     const [editingRequestName, setEditingRequestName] = useState("");
     const [showForm, setShowForm] = useState(false);
@@ -442,8 +458,20 @@
           listKind("trash", { field: "deletedBy", value: me.empId })
         ]);
         if (cancelled) return;
-        const al = myAlarmList || [];
+        let al = myAlarmList || [];
         savedSnapRef.current.alarm = new Map(al.map((a) => [a.id, JSON.stringify(a)]));
+        if (me.isAdmin) {
+          const monday = thisMondayIso();
+          const st = await loadPersonal(BACKUP_REMIND_KEY, {}) || {};
+          if (cancelled) return;
+          if ((st.remindedWeek || "") < monday && (st.backedUpWeek || "") < monday) {
+            await savePersonal(BACKUP_REMIND_KEY, { ...st, remindedWeek: monday });
+            const ra = { id: uid(), toEmpId: me.empId, message: "\uC8FC\uAC04 \uBC31\uC5C5\uC77C\uC785\uB2C8\uB2E4. \uAD00\uB9AC\uC790 \uD0ED\uC5D0\uC11C \uC804\uCCB4 \uB370\uC774\uD130\uB97C \uBC31\uC5C5\uD574 \uC8FC\uC138\uC694. (\uB9E4\uC8FC \uC6D4\uC694\uC77C)", createdAt: dotFormat(isoToday()), read: false, nav: { type: "admin" } };
+            al = [...al, ra];
+            putKind("alarm", ra.id, ra);
+            savedSnapRef.current.alarm.set(ra.id, JSON.stringify(ra));
+          }
+        }
         setAlarms(al);
         const cutoff = Date.now() - TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1e3;
         const tr = myTrashList || [];
@@ -710,8 +738,12 @@
       const ok = await persist({ products: next });
       flash(ok ? "\uC81C\uD488 \uC704\uCE58\uAC00 \uBCC0\uACBD\uB418\uC5C8\uC2B5\uB2C8\uB2E4." : "\uC800\uC7A5 \uC911 \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4.");
     };
-    const renameProduct = async (productId, name) => {
-      const next = products.map((p) => p.id === productId ? { ...p, name } : p);
+    const renameProduct = async (productId, name, ctd) => {
+      const next = products.map((p) => {
+        if (p.id !== productId) return p;
+        const { ctd: _o, ...rest } = p;
+        return { ...rest, name, ...ctd ? { ctd: true } : {} };
+      });
       setProducts(next);
       const ok = await persist({ products: next });
       flash(ok ? "\uC81C\uD488\uBA85\uC774 \uBCC0\uACBD\uB418\uC5C8\uC2B5\uB2C8\uB2E4." : "\uC800\uC7A5 \uC911 \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4.");
@@ -992,7 +1024,7 @@
       setSelection({ type: "all" });
     };
     const openAlarm = (alarm) => {
-      var _a, _b, _c, _d;
+      var _a, _b, _c, _d, _e;
       if (!alarm.read) {
         const next = alarms.map((a) => a.id === alarm.id ? { ...a, read: true } : a);
         setAlarms(next);
@@ -1021,7 +1053,9 @@
           setFocusMemoId(null);
         }
         setSelection({ type: "mytask" });
-      } else if (((_d = alarm.nav) == null ? void 0 : _d.type) === "memo") {
+      } else if (((_d = alarm.nav) == null ? void 0 : _d.type) === "admin") {
+        setSelection({ type: "admin" });
+      } else if (((_e = alarm.nav) == null ? void 0 : _e.type) === "memo") {
         const target = changes.find((c) => c.id === alarm.nav.changeId);
         if (target) {
           const done = statusOf(target, products).allDone;
@@ -1048,7 +1082,9 @@
       setNewProductName("");
       setAddingToCategory(null);
       setAddingToSubcategory(null);
-      const next = [...products, { id: uid(), name, categoryId, subcategoryId: subcategoryId || null }];
+      const ctd = newProductCtd;
+      setNewProductCtd(false);
+      const next = [...products, { id: uid(), name, categoryId, subcategoryId: subcategoryId || null, ...ctd ? { ctd: true } : {} }];
       setProducts(next);
       const ok = await persist({ products: next });
       flash(ok ? `'${name}' \uC81C\uD488\uC774 \uB4F1\uB85D\uB418\uC5C8\uC2B5\uB2C8\uB2E4.` : "\uC800\uC7A5 \uC911 \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4.");
@@ -1354,6 +1390,10 @@
       try {
         const payload = await buildBackupPayload();
         downloadJson(payload, "revledger-backup");
+        {
+          const st = await loadPersonal(BACKUP_REMIND_KEY, {});
+          savePersonal(BACKUP_REMIND_KEY, { ...st || {}, backedUpWeek: thisMondayIso() });
+        }
         flash(payload.missingFiles.length > 0 ? `\uBC31\uC5C5 \uC644\uB8CC (\uCCA8\uBD80\uD30C\uC77C ${payload.missingFiles.length}\uAC1C\uB294 \uCC3E\uC9C0 \uBABB\uD574 \uC81C\uC678\uB428)` : `\uBC31\uC5C5 \uC644\uB8CC (\uCCA8\uBD80\uD30C\uC77C ${Object.keys(payload.files).length}\uAC1C \uD3EC\uD568)`);
       } catch (e) {
         flash("\uB370\uC774\uD130\uB97C \uBD88\uB7EC\uC624\uC9C0 \uBABB\uD574 \uBC31\uC5C5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. \uC7A0\uC2DC \uD6C4 \uB2E4\uC2DC \uC2DC\uB3C4\uD574 \uC8FC\uC138\uC694.");
@@ -1955,13 +1995,13 @@
         value: sidebarProductSearch,
         onChange: (e) => setSidebarProductSearch(e.target.value)
       }
-    ), /* @__PURE__ */ React.createElement("div", { style: styles.sidebarScroll }, sidebarProductSearch.trim() ? /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: styles.sidebarLabel }, "\uAC80\uC0C9 \uACB0\uACFC"), products.filter((p) => normHeader(p.name).includes(normHeader(sidebarProductSearch))).length === 0 ? /* @__PURE__ */ React.createElement("div", { style: styles.emptyStateSmall }, "\uAC80\uC0C9 \uACB0\uACFC\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.") : products.filter((p) => normHeader(p.name).includes(normHeader(sidebarProductSearch))).slice().sort(byNameAsc).map((p) => {
+    ), /* @__PURE__ */ React.createElement("div", { style: styles.sidebarScroll }, sidebarProductSearch.trim() ? /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: styles.sidebarLabel }, "\uAC80\uC0C9 \uACB0\uACFC"), products.filter((p) => matchProductSearch(p, sidebarProductSearch)).length === 0 ? /* @__PURE__ */ React.createElement("div", { style: styles.emptyStateSmall }, "\uAC80\uC0C9 \uACB0\uACFC\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.") : products.filter((p) => matchProductSearch(p, sidebarProductSearch)).slice().sort(byNameAsc).map((p) => {
       const active = selection.type === "product" && selection.productId === p.id;
       const prodFav = myFavorites.productIds.includes(p.id);
       return /* @__PURE__ */ React.createElement("div", { key: p.id, onClick: () => setSelection({ type: "product", productId: p.id }), style: { ...styles.productRow, ...active ? styles.productRowActive : {} } }, /* @__PURE__ */ React.createElement("span", { style: prodFav ? styles.starIconOn : styles.starIconOff, onClick: (e) => {
         e.stopPropagation();
         toggleFavoriteProduct(p.id);
-      } }, prodFav ? "\u2605" : "\u2606"), /* @__PURE__ */ React.createElement("span", { style: styles.productName }, p.name), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: TOKENS.ink3 } }, catName(categories, p.categoryId)));
+      } }, prodFav ? "\u2605" : "\u2606"), /* @__PURE__ */ React.createElement("span", { style: styles.productName }, p.name), p.ctd && /* @__PURE__ */ React.createElement(CtdBadge, null), /* @__PURE__ */ React.createElement("span", { style: { fontSize: 11, color: TOKENS.ink3 } }, catName(categories, p.categoryId)));
     })) : /* @__PURE__ */ React.createElement(React.Fragment, null, (myFavorites.categoryIds.length > 0 || myFavorites.productIds.length > 0) && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: styles.sidebarLabel }, "\uC990\uACA8\uCC3E\uAE30"), /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 14 } }, myFavorites.categoryIds.map((cid) => {
       const cat = categories.find((c) => c.id === cid);
       if (!cat) return null;
@@ -1989,7 +2029,7 @@
       return /* @__PURE__ */ React.createElement("div", { key: `fav-prod-${pid}`, style: { ...styles.productRow, ...active ? styles.productRowActive : {} }, onClick: () => setSelection({ type: "product", productId: pid }) }, /* @__PURE__ */ React.createElement("span", { style: styles.starIconOn, onClick: (e) => {
         e.stopPropagation();
         toggleFavoriteProduct(pid);
-      } }, "\u2605"), /* @__PURE__ */ React.createElement("span", { style: styles.productName }, prod.name));
+      } }, "\u2605"), /* @__PURE__ */ React.createElement("span", { style: styles.productName }, prod.name), prod.ctd && /* @__PURE__ */ React.createElement(CtdBadge, null));
     }))), /* @__PURE__ */ React.createElement("div", { style: styles.sidebarLabel }, "\uC81C\uD615 \uBD84\uB958"), /* @__PURE__ */ React.createElement("div", { style: styles.categoryList }, categories.map((cat) => {
       const items = productsByCategory(cat.id);
       const pendingAdds = pendingAddsByCategory(cat.id);
@@ -2023,6 +2063,8 @@
           addingToCategory,
           addingToSubcategory,
           newProductName,
+          newProductCtd,
+          setNewProductCtd,
           setNewProductName,
           setAddingToCategory,
           setAddingToSubcategory,
@@ -2263,6 +2305,8 @@
       addingToSubcategory,
       newProductName,
       setNewProductName,
+      newProductCtd,
+      setNewProductCtd,
       setAddingToCategory,
       setAddingToSubcategory,
       addProduct,
@@ -2293,7 +2337,7 @@
       return /* @__PURE__ */ React.createElement("div", { key: p.id, onClick: () => onSelectProduct(p.id), style: { ...styles.productRow, ...active ? styles.productRowActive : {} } }, /* @__PURE__ */ React.createElement("span", { style: prodFav ? styles.starIconOn : styles.starIconOff, onClick: (e) => {
         e.stopPropagation();
         onToggleFavoriteProduct(p.id);
-      } }, prodFav ? "\u2605" : "\u2606"), /* @__PURE__ */ React.createElement("span", { style: { ...styles.productName, ...deleteReq ? { textDecoration: "line-through", opacity: 0.6 } : {} } }, p.name), /* @__PURE__ */ React.createElement("span", { style: { display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" } }, deleteReq && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { style: styles.pendingTag }, "\uC0AD\uC81C\uB300\uAE30"), canManageRequest(deleteReq) && /* @__PURE__ */ React.createElement("button", { style: styles.chipActionBtn, onClick: (e) => {
+      } }, prodFav ? "\u2605" : "\u2606"), /* @__PURE__ */ React.createElement("span", { style: { ...styles.productName, ...deleteReq ? { textDecoration: "line-through", opacity: 0.6 } : {} } }, p.name), p.ctd && /* @__PURE__ */ React.createElement(CtdBadge, null), /* @__PURE__ */ React.createElement("span", { style: { display: "flex", alignItems: "center", gap: 6, marginLeft: "auto" } }, deleteReq && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { style: styles.pendingTag }, "\uC0AD\uC81C\uB300\uAE30"), canManageRequest(deleteReq) && /* @__PURE__ */ React.createElement("button", { style: styles.chipActionBtn, onClick: (e) => {
         e.stopPropagation();
         cancelRequest(deleteReq);
       } }, "\uCDE8\uC18C")), pc > 0 && /* @__PURE__ */ React.createElement("span", { style: styles.countBadgeAlert }, pc), !deleteReq && editMode && /* @__PURE__ */ React.createElement(
@@ -2302,7 +2346,7 @@
           style: styles.chipActionBtn,
           onClick: (e) => {
             e.stopPropagation();
-            setRenameModal({ type: "product", title: "\uC81C\uD488\uBA85 \uC218\uC815", label: "\uC81C\uD488\uBA85", name: p.name, onSave: (name) => onRenameProduct(p.id, name) });
+            setRenameModal({ type: "product", title: "\uC81C\uD488\uBA85 \uC218\uC815", label: "\uC81C\uD488\uBA85", name: p.name, ctd: !!p.ctd, onSave: (name, ctd) => onRenameProduct(p.id, name, ctd) });
           }
         },
         "\uC218\uC815"
@@ -2335,10 +2379,11 @@
       ), editMode && /* @__PURE__ */ React.createElement(MoveSubcategoryControl, { sub, categories, onMove: onMoveSubcategory }), isAdmin && editMode && /* @__PURE__ */ React.createElement("span", { style: styles.tinyLink, onClick: () => onDeleteSubcategory(sub.id) }, "\xD7")), subExpanded && /* @__PURE__ */ React.createElement("div", { style: { paddingLeft: 14 } }, subItems.map(renderProductRow), editMode && (addingToSubcategory === sub.id ? /* @__PURE__ */ React.createElement("div", { style: styles.addProductBox, onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement("input", { autoFocus: true, style: styles.addProductInput, placeholder: "\uC81C\uD488\uBA85 \uC785\uB825", value: newProductName, onChange: (e) => setNewProductName(e.target.value), onKeyDown: (e) => {
         if (e.key === "Enter") addProduct(cat.id, sub.id);
         if (e.key === "Escape") setAddingToSubcategory(null);
-      } }), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 6, marginTop: 6 } }, /* @__PURE__ */ React.createElement("button", { style: styles.smallPrimaryBtn, onClick: () => addProduct(cat.id, sub.id) }, "\uB4F1\uB85D"), /* @__PURE__ */ React.createElement("button", { style: styles.smallGhostBtn, onClick: () => setAddingToSubcategory(null) }, "\uCDE8\uC18C"))) : /* @__PURE__ */ React.createElement("button", { style: styles.smallGhostBtn, onClick: (e) => {
+      } }), /* @__PURE__ */ React.createElement("label", { style: { display: "flex", alignItems: "center", gap: 6, marginTop: 6, fontSize: 12.5, cursor: "pointer" } }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: newProductCtd, onChange: (e) => setNewProductCtd(e.target.checked) }), " CTD \uC81C\uD488 (\uC120\uD0DD)"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 6, marginTop: 6 } }, /* @__PURE__ */ React.createElement("button", { style: styles.smallPrimaryBtn, onClick: () => addProduct(cat.id, sub.id) }, "\uB4F1\uB85D"), /* @__PURE__ */ React.createElement("button", { style: styles.smallGhostBtn, onClick: () => setAddingToSubcategory(null) }, "\uCDE8\uC18C"))) : /* @__PURE__ */ React.createElement("button", { style: styles.smallGhostBtn, onClick: (e) => {
         e.stopPropagation();
         setAddingToSubcategory(sub.id);
         setNewProductName("");
+        setNewProductCtd(false);
       } }, "+ \uC81C\uD488 \uCD94\uAC00"))));
     }), unfiledItems.map(renderProductRow), pendingAdds.map((r) => /* @__PURE__ */ React.createElement("div", { key: r.id, style: styles.pendingRow }, editingRequestId === r.id ? /* @__PURE__ */ React.createElement("span", { style: { display: "flex", gap: 4, flex: 1 }, onClick: (e) => e.stopPropagation() }, /* @__PURE__ */ React.createElement("input", { autoFocus: true, style: styles.addProductInput, value: editingRequestName, onChange: (e) => setEditingRequestName(e.target.value), onKeyDown: (e) => {
       if (e.key === "Enter") saveRequestEdit(r.id);
@@ -2349,32 +2394,36 @@
     } }, "\uC218\uC815"), /* @__PURE__ */ React.createElement("span", { style: styles.tinyLink, onClick: () => cancelRequest(r) }, "\uCDE8\uC18C"))))), editMode && (addingToCategory === cat.id ? /* @__PURE__ */ React.createElement("div", { style: styles.addProductBox }, /* @__PURE__ */ React.createElement("input", { autoFocus: true, style: styles.addProductInput, placeholder: "\uC81C\uD488\uBA85 \uC785\uB825", value: newProductName, onChange: (e) => setNewProductName(e.target.value), onKeyDown: (e) => {
       if (e.key === "Enter") addProduct(cat.id);
       if (e.key === "Escape") setAddingToCategory(null);
-    } }), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 6, marginTop: 6 } }, /* @__PURE__ */ React.createElement("button", { style: styles.smallPrimaryBtn, onClick: () => addProduct(cat.id) }, "\uB4F1\uB85D"), /* @__PURE__ */ React.createElement("button", { style: styles.smallGhostBtn, onClick: () => setAddingToCategory(null) }, "\uCDE8\uC18C"))) : /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 10 } }, /* @__PURE__ */ React.createElement(AddSubcategoryControl, { onAdd: (name) => onAddSubcategory(name, cat.id) }), /* @__PURE__ */ React.createElement("button", { style: styles.smallGhostBtn, onClick: () => {
+    } }), /* @__PURE__ */ React.createElement("label", { style: { display: "flex", alignItems: "center", gap: 6, marginTop: 6, fontSize: 12.5, cursor: "pointer" } }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: newProductCtd, onChange: (e) => setNewProductCtd(e.target.checked) }), " CTD \uC81C\uD488 (\uC120\uD0DD)"), /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 6, marginTop: 6 } }, /* @__PURE__ */ React.createElement("button", { style: styles.smallPrimaryBtn, onClick: () => addProduct(cat.id) }, "\uB4F1\uB85D"), /* @__PURE__ */ React.createElement("button", { style: styles.smallGhostBtn, onClick: () => setAddingToCategory(null) }, "\uCDE8\uC18C"))) : /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 10 } }, /* @__PURE__ */ React.createElement(AddSubcategoryControl, { onAdd: (name) => onAddSubcategory(name, cat.id) }), /* @__PURE__ */ React.createElement("button", { style: styles.smallGhostBtn, onClick: () => {
       setAddingToCategory(cat.id);
       setNewProductName("");
+      setNewProductCtd(false);
     } }, "+ \uC81C\uD488 \uCD94\uAC00")))), renameModal && /* @__PURE__ */ React.createElement(
       RenameModal,
       {
         title: renameModal.title,
         label: renameModal.label,
         initialValue: renameModal.name,
+        withCtd: renameModal.type === "product",
+        initialCtd: !!renameModal.ctd,
         onSave: renameModal.onSave,
         onClose: () => setRenameModal(null)
       }
     ));
   }
-  function RenameModal({ title, label, initialValue, onSave, onClose }) {
+  function RenameModal({ title, label, initialValue, withCtd, initialCtd, onSave, onClose }) {
     const [value, setValue] = useState(initialValue);
+    const [ctd, setCtd] = useState(!!initialCtd);
     const submit = () => {
       if (!value.trim()) return;
-      onSave(value.trim());
+      onSave(value.trim(), ctd);
       onClose();
     };
     return /* @__PURE__ */ React.createElement("div", { style: styles.overlay, onMouseDown: (e) => {
       if (e.target === e.currentTarget) onClose();
     } }, /* @__PURE__ */ React.createElement("div", { style: { ...styles.modal, width: 360 } }, /* @__PURE__ */ React.createElement("div", { style: styles.modalHeader }, /* @__PURE__ */ React.createElement("span", null, title), /* @__PURE__ */ React.createElement("span", { style: styles.modalClose, onClick: onClose }, "\xD7")), /* @__PURE__ */ React.createElement("div", { style: styles.modalBody }, /* @__PURE__ */ React.createElement("div", { style: styles.fieldLabel }, label), /* @__PURE__ */ React.createElement("input", { autoFocus: true, style: styles.input, value, onChange: (e) => setValue(e.target.value), onKeyDown: (e) => {
       if (e.key === "Enter") submit();
-    } })), /* @__PURE__ */ React.createElement("div", { style: styles.modalFooter }, /* @__PURE__ */ React.createElement("button", { style: styles.ghostBtn, onClick: onClose }, "\uCDE8\uC18C"), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: submit }, "\uC800\uC7A5"))));
+    } }), withCtd && /* @__PURE__ */ React.createElement("label", { style: { display: "flex", alignItems: "center", gap: 6, marginTop: 10, fontSize: 13, cursor: "pointer" } }, /* @__PURE__ */ React.createElement("input", { type: "checkbox", checked: ctd, onChange: (e) => setCtd(e.target.checked) }), " CTD \uC81C\uD488 (\uC120\uD0DD)")), /* @__PURE__ */ React.createElement("div", { style: styles.modalFooter }, /* @__PURE__ */ React.createElement("button", { style: styles.ghostBtn, onClick: onClose }, "\uCDE8\uC18C"), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: submit }, "\uC800\uC7A5"))));
   }
   function AddCategoryControl({ onAdd }) {
     const [adding, setAdding] = useState(false);
@@ -3314,7 +3363,7 @@
       const cat = categories.find((c) => c.id === catId);
       const expanded = !!expandedStatusCats[catId];
       const doneInCat = prods.filter((p) => change.completions[p.id]).length;
-      return /* @__PURE__ */ React.createElement("div", { key: catId }, /* @__PURE__ */ React.createElement("div", { style: styles.categoryStatusHeader, onClick: () => setExpandedStatusCats((s) => ({ ...s, [catId]: !s[catId] })) }, /* @__PURE__ */ React.createElement("span", { style: styles.chevronBtn }, expanded ? "\u25BE" : "\u25B8"), /* @__PURE__ */ React.createElement("span", { style: { flex: 1 } }, cat ? cat.name : "\uAE30\uD0C0"), /* @__PURE__ */ React.createElement("span", { style: styles.progressTag }, doneInCat, "/", prods.length)), expanded && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 4, marginBottom: 4 } }, prods.map((p) => /* @__PURE__ */ React.createElement("div", { key: p.id, style: styles.productStatusRow }, /* @__PURE__ */ React.createElement("span", { style: styles.productStatusName }, p.name), /* @__PURE__ */ React.createElement(CompletionControl, { resolved: change.completions[p.id], onComplete: (date, revNo) => onSetCompletion(change.id, p.id, { date, revNo }), onRevert: () => onSetCompletion(change.id, p.id, null) })))));
+      return /* @__PURE__ */ React.createElement("div", { key: catId }, /* @__PURE__ */ React.createElement("div", { style: styles.categoryStatusHeader, onClick: () => setExpandedStatusCats((s) => ({ ...s, [catId]: !s[catId] })) }, /* @__PURE__ */ React.createElement("span", { style: styles.chevronBtn }, expanded ? "\u25BE" : "\u25B8"), /* @__PURE__ */ React.createElement("span", { style: { flex: 1 } }, cat ? cat.name : "\uAE30\uD0C0"), /* @__PURE__ */ React.createElement("span", { style: styles.progressTag }, doneInCat, "/", prods.length)), expanded && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 4, marginBottom: 4 } }, prods.map((p) => /* @__PURE__ */ React.createElement("div", { key: p.id, style: styles.productStatusRow }, /* @__PURE__ */ React.createElement("span", { style: styles.productStatusName }, p.name), p.ctd && /* @__PURE__ */ React.createElement(CtdBadge, null), /* @__PURE__ */ React.createElement(CompletionControl, { resolved: change.completions[p.id], onComplete: (date, revNo) => onSetCompletion(change.id, p.id, { date, revNo }), onRevert: () => onSetCompletion(change.id, p.id, null) })))));
     }), relatedProducts.length === 0 && /* @__PURE__ */ React.createElement("span", { style: { fontSize: 12.5, color: TOKENS.ink3 } }, change.productIds.length === 0 ? "\uAD00\uB828 \uC81C\uD488\uC774 \uC9C0\uC815\uB418\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4. (\uC218\uC815 \uBC84\uD2BC\uC73C\uB85C \uC81C\uD488\uC744 \uCD94\uAC00\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4)" : "\uC0AD\uC81C\uB41C \uC81C\uD488\uB9CC \uC5F0\uACB0\uB418\uC5B4 \uC788\uC2B5\uB2C8\uB2E4"))) : /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12, color: TOKENS.ink3, marginTop: 12 } }, "\uC774 \uD654\uBA74\uC740 \uC120\uD0DD\uD55C \uC81C\uD488\uC758 \uBC18\uC601 \uD604\uD669\uB9CC \uD45C\uC2DC\uD569\uB2C8\uB2E4. \uC804\uCCB4 \uC81C\uD488 \uD604\uD669\uC740 '\uC804\uCCB4 \uBCC0\uACBD \uC774\uB825'\uC5D0\uC11C \uD655\uC778\uD558\uC138\uC694."), onViewInAllTab && /* @__PURE__ */ React.createElement("div", { style: { marginTop: 12 } }, /* @__PURE__ */ React.createElement("button", { style: styles.chipActionBtn, onClick: (e) => {
       e.stopPropagation();
       onViewInAllTab();
@@ -3406,7 +3455,7 @@
       setError("");
       onSubmit({ docNumber, changeName, historyText, noteText, dueDate, productIds, attachment });
     };
-    const searchResults = productSearch.trim() ? products.filter((p) => normHeader(p.name).includes(normHeader(productSearch))).slice().sort(byNameAsc) : [];
+    const searchResults = productSearch.trim() ? products.filter((p) => matchProductSearch(p, productSearch)).slice().sort(byNameAsc) : [];
     return /* @__PURE__ */ React.createElement("div", { style: styles.overlay, onMouseDown: (e) => e.target === e.currentTarget && onCancel() }, /* @__PURE__ */ React.createElement("div", { style: styles.modal }, /* @__PURE__ */ React.createElement("div", { style: styles.modalHeader }, /* @__PURE__ */ React.createElement("span", null, proposalMode ? "\uBCC0\uACBD \uC218\uC815 \uC81C\uC548" : isEdit ? "\uBCC0\uACBD \uC218\uC815" : "\uBCC0\uACBD \uB4F1\uB85D"), /* @__PURE__ */ React.createElement("span", { style: styles.modalClose, onClick: onCancel }, "\xD7")), /* @__PURE__ */ React.createElement("div", { style: styles.modalBody }, proposalMode ? /* @__PURE__ */ React.createElement("div", { style: styles.registrantBox }, "\uB4F1\uB85D\uC790 ", /* @__PURE__ */ React.createElement("strong", null, (_h = initial.registrant) == null ? void 0 : _h.name), " (", teamName(teams, (_i = initial.registrant) == null ? void 0 : _i.team), ")\uC758 \uBCC0\uACBD\uC785\uB2C8\uB2E4. \uC81C\uC548\uD558\uC2E0 \uB0B4\uC6A9\uC740 \uB4F1\uB85D\uC790\uAC00 \uC2B9\uC778\uD574\uC57C \uBC18\uC601\uB3FC\uC694.") : /* @__PURE__ */ React.createElement("div", { style: styles.registrantBox }, "\uB4F1\uB85D\uC790 ", /* @__PURE__ */ React.createElement("strong", null, isEdit ? (_j = initial.registrant) == null ? void 0 : _j.name : me.name), " (", teamName(teams, isEdit ? (_k = initial.registrant) == null ? void 0 : _k.team : me.team), ")"), /* @__PURE__ */ React.createElement(LabeledInput, { label: "\uBCC0\uACBD\uBB38\uC11C\uBC88\uD638", value: docNumber, onChange: (v) => setDocNumber(formatDocNumberInput(v, docNumber)), placeholder: "\uC608) 26010101 \uC785\uB825 \uC2DC CC-260101-01\uB85C \uC790\uB3D9 \uBCC0\uD658", mono: true, invalid: isDupDoc }), /* @__PURE__ */ React.createElement(LabeledInput, { label: "\uBCC0\uACBD\uBA85", value: changeName, onChange: setChangeName, placeholder: "\uC608) \uC6D0\uB8CC \uC81C\uC870\uC6D0 \uCD94\uAC00" }), /* @__PURE__ */ React.createElement(LabeledTextarea, { label: "\uBCC0\uACBD \uB0B4\uC6A9", value: historyText, onChange: setHistoryText, placeholder: "\uBCC0\uACBD \uC0C1\uC138 \uB0B4\uC6A9" }), /* @__PURE__ */ React.createElement(LabeledTextarea, { label: "\uD2B9\uC774\uC0AC\uD56D \uAE30\uC7AC\uB780", value: noteText, onChange: setNoteText, placeholder: "\uCC38\uACE0\uC0AC\uD56D\uC774\uB098 \uC720\uC758\uD560 \uB0B4\uC6A9\uC744 \uC785\uB825\uD558\uC138\uC694" }), /* @__PURE__ */ React.createElement("div", { style: { marginBottom: 14 } }, /* @__PURE__ */ React.createElement("div", { style: styles.fieldLabel }, "\uC644\uB8CC\uC608\uC815\uC77C"), /* @__PURE__ */ React.createElement(
       "input",
       {
@@ -3439,7 +3488,7 @@
     ), /* @__PURE__ */ React.createElement("div", { style: styles.productPickWrap }, searchResults.length === 0 ? /* @__PURE__ */ React.createElement("div", { style: { fontSize: 12.5, color: TOKENS.ink3 } }, "\uAC80\uC0C9 \uACB0\uACFC\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.") : searchResults.map((p) => {
       const active = productIds.includes(p.id);
       const cat = categories.find((c) => c.id === p.categoryId);
-      return /* @__PURE__ */ React.createElement("button", { key: p.id, onClick: () => toggleProduct(p.id), style: { ...styles.pickChip, ...active ? styles.pickChipActive : {} } }, active ? "\u2713 " : "", p.name, " ", /* @__PURE__ */ React.createElement("span", { style: { opacity: 0.7, fontSize: 11 } }, "(", cat == null ? void 0 : cat.name, ")"));
+      return /* @__PURE__ */ React.createElement("button", { key: p.id, onClick: () => toggleProduct(p.id), style: { ...styles.pickChip, ...active ? styles.pickChipActive : {} } }, active ? "\u2713 " : "", p.name, p.ctd && /* @__PURE__ */ React.createElement(CtdBadge, null), " ", /* @__PURE__ */ React.createElement("span", { style: { opacity: 0.7, fontSize: 11 } }, "(", cat == null ? void 0 : cat.name, ")"));
     }))) : /* @__PURE__ */ React.createElement("div", { style: { fontSize: 11, color: TOKENS.ink3, marginBottom: 8 } }, '\uC81C\uD615\uBA85\uC744 \uD074\uB9AD\uD558\uBA74 \uD558\uC704 \uD56D\uBAA9\uC774 \uD3BC\uCCD0\uC9C0\uACE0, \uD3BC\uCE5C \uC548\uC5D0\uC11C "\uC804\uCCB4 \uC120\uD0DD"\uC73C\uB85C \uD55C\uBC88\uC5D0 \uACE0\uB97C \uC218 \uC788\uC2B5\uB2C8\uB2E4.'), !productSearch.trim() && categories.map((cat) => {
       const catProducts = products.filter((p) => p.categoryId === cat.id);
       if (catProducts.length === 0) return null;
@@ -3489,11 +3538,11 @@
           ")"
         ), /* @__PURE__ */ React.createElement("div", { style: { ...styles.productPickWrap, marginTop: 6 } }, subProducts.map((p) => {
           const active = productIds.includes(p.id);
-          return /* @__PURE__ */ React.createElement("button", { key: p.id, onClick: () => toggleProduct(p.id), style: { ...styles.pickChip, ...active ? styles.pickChipActive : {} } }, active ? "\u2713 " : "", p.name);
+          return /* @__PURE__ */ React.createElement("button", { key: p.id, onClick: () => toggleProduct(p.id), style: { ...styles.pickChip, ...active ? styles.pickChipActive : {} } }, active ? "\u2713 " : "", p.name, p.ctd && /* @__PURE__ */ React.createElement(CtdBadge, null));
         }))));
       }), ungrouped.length > 0 && /* @__PURE__ */ React.createElement("div", { style: { ...styles.productPickWrap, marginTop: 8 } }, ungrouped.map((p) => {
         const active = productIds.includes(p.id);
-        return /* @__PURE__ */ React.createElement("button", { key: p.id, onClick: () => toggleProduct(p.id), style: { ...styles.pickChip, ...active ? styles.pickChipActive : {} } }, active ? "\u2713 " : "", p.name);
+        return /* @__PURE__ */ React.createElement("button", { key: p.id, onClick: () => toggleProduct(p.id), style: { ...styles.pickChip, ...active ? styles.pickChipActive : {} } }, active ? "\u2713 " : "", p.name, p.ctd && /* @__PURE__ */ React.createElement(CtdBadge, null));
       }))));
     })), error && /* @__PURE__ */ React.createElement("div", { style: styles.errorText }, error)), /* @__PURE__ */ React.createElement("div", { style: styles.modalFooter }, /* @__PURE__ */ React.createElement("button", { style: styles.ghostBtn, onClick: onCancel }, "\uCDE8\uC18C"), /* @__PURE__ */ React.createElement("button", { style: styles.primaryBtn, onClick: submit }, proposalMode ? "\uC81C\uC548\uD558\uAE30" : isEdit ? "\uC800\uC7A5" : "\uB4F1\uB85D"))));
   }
