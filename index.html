@@ -217,7 +217,13 @@
     historyText: ["\uBCC0\uACBD\uB0B4\uC6A9", "\uBCC0\uACBD\uC0C1\uC138\uB0B4\uC6A9", "\uC81C\uAC1C\uC815\uC774\uB825\uAE30\uC7AC\uB0B4\uC6A9", "\uB0B4\uC6A9"],
     noteText: ["\uD2B9\uC774\uC0AC\uD56D", "\uD2B9\uC774\uC0AC\uD56D\uAE30\uC7AC\uB780", "\uBE44\uACE0"],
     dueDate: ["\uC644\uB8CC\uC608\uC815\uC77C", "\uC644\uB8CC\uC608\uC815", "\uC608\uC815\uC77C"],
-    products: ["\uAD00\uB828\uC81C\uD488", "\uAD00\uB828\uC81C\uD488\uBA85", "\uC81C\uD488", "\uC81C\uD488\uBA85"]
+    products: ["\uAD00\uB828\uC81C\uD488", "\uAD00\uB828\uC81C\uD488\uBA85", "\uC81C\uD488", "\uC81C\uD488\uBA85"],
+    // 아래 열은 '변경 전체 엑셀 다운로드' 파일에만 있는 선택 열 (복구용)
+    registrantId: ["\uB4F1\uB85D\uC790\uC0AC\uBC88", "\uC0AC\uBC88"],
+    registrantName: ["\uB4F1\uB85D\uC790", "\uB4F1\uB85D\uC790\uBA85"],
+    createdAt: ["\uB4F1\uB85D\uC77C"],
+    completions: ["\uC81C\uD488\uBCC4\uC644\uB8CC\uD604\uD669", "\uC644\uB8CC\uD604\uD669"],
+    productIds: ["\uC81C\uD488id"]
   };
   function normHeader(s) {
     return String(s != null ? s : "").replace(/\s+/g, "").toLowerCase();
@@ -749,7 +755,7 @@
       flash(ok ? "\uC81C\uD488\uBA85\uC774 \uBCC0\uACBD\uB418\uC5C8\uC2B5\uB2C8\uB2E4." : "\uC800\uC7A5 \uC911 \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4.");
     };
     const importProductsFromExcel = async (file) => {
-      var _a, _b, _c;
+      var _a, _b, _c, _d;
       try {
         const buf = await file.arrayBuffer();
         const wb = XLSX.read(buf, { type: "array" });
@@ -763,7 +769,7 @@
           const catName2 = String((_a = row["\uC81C\uD615"]) != null ? _a : "").trim();
           const subName = String((_b = row["\uBB38\uC11C\uD568"]) != null ? _b : "").trim();
           const prodName = String((_c = row["\uC81C\uD488\uBA85"]) != null ? _c : "").trim();
-          if (!catName2 || !prodName) {
+          if (!catName2) {
             skipped++;
             continue;
           }
@@ -781,12 +787,15 @@
             }
             subId = sub.id;
           }
+          if (!prodName) continue;
+          const ctdCell = String((_d = row["CTD"]) != null ? _d : "").trim().toLowerCase();
+          const isCtd = ["o", "y", "yes", "true", "1", "v", "ctd", "\u2713", "\u25CB", "\u25CF", "\uCCB4\uD06C"].includes(ctdCell);
           const dup = nextProducts.some((p) => p.categoryId === cat.id && (p.subcategoryId || null) === subId && p.name === prodName);
           if (dup) {
             skipped++;
             continue;
           }
-          nextProducts = [...nextProducts, { id: uid(), name: prodName, categoryId: cat.id, subcategoryId: subId }];
+          nextProducts = [...nextProducts, { id: uid(), name: prodName, categoryId: cat.id, subcategoryId: subId, ...isCtd ? { ctd: true } : {} }];
           added++;
         }
         setCategories(nextCategories);
@@ -1558,6 +1567,51 @@
       XLSX.utils.book_append_sheet(wb, guide, "\uC791\uC131\uC548\uB0B4");
       XLSX.writeFile(wb, "\uBCC0\uACBD_\uC77C\uAD04\uB4F1\uB85D_\uC591\uC2DD.xlsx");
     };
+    const exportChangesToExcel = (list, nameLabel) => {
+      if (!list || list.length === 0) {
+        flash("\uB0B4\uB824\uBC1B\uC744 \uBCC0\uACBD\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.");
+        return;
+      }
+      const header = ["\uBCC0\uACBD\uBB38\uC11C\uBC88\uD638", "\uBCC0\uACBD\uBA85", "\uBCC0\uACBD \uB0B4\uC6A9", "\uD2B9\uC774\uC0AC\uD56D", "\uC644\uB8CC\uC608\uC815\uC77C", "\uAD00\uB828\uC81C\uD488", "\uB4F1\uB85D\uC790\uC0AC\uBC88", "\uB4F1\uB85D\uC790", "\uB4F1\uB85D\uC77C", "\uC81C\uD488\uBCC4 \uC644\uB8CC\uD604\uD669", "\uC81C\uD488ID"];
+      const aoa = [header];
+      list.forEach((c) => {
+        var _a, _b;
+        const prods = (c.productIds || []).map((id) => products.find((p) => p.id === id)).filter(Boolean);
+        const comp = prods.filter((p) => {
+          var _a2;
+          return (_a2 = c.completions) == null ? void 0 : _a2[p.id];
+        }).map((p) => `${p.name} | ${c.completions[p.id].revNo || ""} | ${c.completions[p.id].date || ""}`).join("\n");
+        aoa.push([
+          c.docNumber || "",
+          c.changeName || "",
+          c.historyText || "",
+          c.noteText || "",
+          c.dueDate || "",
+          prods.map((p) => p.name).join(", "),
+          ((_a = c.registrant) == null ? void 0 : _a.empId) || "",
+          ((_b = c.registrant) == null ? void 0 : _b.name) || "",
+          c.createdAt || "",
+          comp,
+          prods.map((p) => p.id).join(",")
+        ]);
+      });
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      ws["!cols"] = [{ wch: 18 }, { wch: 26 }, { wch: 40 }, { wch: 24 }, { wch: 14 }, { wch: 36 }, { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 40 }, { wch: 20 }];
+      const guide = XLSX.utils.aoa_to_sheet([
+        ["\uC548\uB0B4"],
+        ["\xB7 \uC774 \uD30C\uC77C\uC740 '\uC5D1\uC140\uB85C \uBCC0\uACBD \uC77C\uAD04 \uB4F1\uB85D'\uC5D0 \uADF8\uB300\uB85C \uB123\uC73C\uBA74 \uBCC0\uACBD\uC774 \uB2E4\uC2DC \uB4F1\uB85D\uB429\uB2C8\uB2E4. (\uC81C\uBAA9\uD589\uACFC \uC5F4 \uAD6C\uC131\uC740 \uC218\uC815\uD558\uC9C0 \uB9C8\uC138\uC694)"],
+        ["\xB7 \uBCF5\uAD6C\uB418\uB294 \uB0B4\uC6A9: \uBCC0\uACBD\uBB38\uC11C\uBC88\uD638, \uBCC0\uACBD\uBA85, \uBCC0\uACBD \uB0B4\uC6A9, \uD2B9\uC774\uC0AC\uD56D, \uC644\uB8CC\uC608\uC815\uC77C, \uAD00\uB828\uC81C\uD488, \uB4F1\uB85D\uC790, \uB4F1\uB85D\uC77C, \uC81C\uD488\uBCC4 \uC644\uB8CC\uD604\uD669(Rev.No./\uC644\uB8CC\uC77C)"],
+        ["\xB7 \uBCF5\uAD6C\uB418\uC9C0 \uC54A\uB294 \uB0B4\uC6A9: \uBA54\uBAA8/\uB2F5\uC7A5, \uCCA8\uBD80\uD30C\uC77C, \uC218\uC815 \uC81C\uC548 \uAE30\uB85D"],
+        ["\xB7 \uC774\uBBF8 \uB4F1\uB85D\uB41C \uBCC0\uACBD\uBB38\uC11C\uBC88\uD638\uB294 \uAC74\uB108\uB701\uB2C8\uB2E4."],
+        [`\xB7 \uB0B4\uB824\uBC1B\uC740 \uC2DC\uAC01: ${(/* @__PURE__ */ new Date()).toLocaleString("ko-KR")} / ${list.length}\uAC74`]
+      ]);
+      guide["!cols"] = [{ wch: 95 }];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "\uBCC0\uACBD\uBAA9\uB85D");
+      XLSX.utils.book_append_sheet(wb, guide, "\uC548\uB0B4");
+      XLSX.writeFile(wb, `\uBCC0\uACBD\uBAA9\uB85D_${nameLabel}_${isoToday()}.xlsx`);
+      flash(`\uBCC0\uACBD ${list.length}\uAC74\uC744 \uC5D1\uC140\uB85C \uB0B4\uB824\uBC1B\uC558\uC2B5\uB2C8\uB2E4.`);
+    };
     const importChangesFromExcel = async (file) => {
       var _a, _b, _c;
       setImportingChanges(true);
@@ -1652,7 +1706,9 @@
             continue;
           }
           const names = String(get("products")).split(/[,，、;；\n]+/).map((s) => s.trim()).filter(Boolean);
-          const { ids: productIds, ambiguous, missing } = resolveProducts(names);
+          const idCell = String(get("productIds")).split(/[,\s]+/).filter(Boolean);
+          const idsOk = idCell.length > 0 && idCell.length === names.length && idCell.every((id) => products.some((p) => p.id === id));
+          const { ids: productIds, ambiguous, missing } = idsOk ? { ids: idCell, ambiguous: [], missing: [] } : resolveProducts(names);
           if (missing.length > 0) {
             skipped.push({ rowNo, docNumber, reason: `\uB4F1\uB85D\uB418\uC9C0 \uC54A\uC740 \uC81C\uD488/\uC81C\uD615/\uBB38\uC11C\uD568: ${missing.join(", ")}` });
             continue;
@@ -1669,8 +1725,12 @@
             noteText: String(get("noteText")).trim(),
             dueDate: due.value || null
           };
+          const regId = String(get("registrantId")).trim();
+          const regName = String(get("registrantName")).trim();
+          const createdRaw = String(get("createdAt")).trim();
+          const completionList = String(get("completions")).split(/\r?\n/).map((line) => line.split("|").map((x) => x.trim())).filter((a) => a.length >= 3 && a[0]).map((a) => ({ name: a[0], revNo: a.slice(1, -1).join("|"), date: parseImportDate(a[a.length - 1]) })).filter((x) => x.date.ok && x.date.value);
           existingDocs.add(docKey);
-          pendingRows.push({ rowNo, ...base, certainIds: productIds, ambiguous });
+          pendingRows.push({ rowNo, ...base, certainIds: productIds, ambiguous, regId, regName, createdRaw, completionList });
         }
         if (pendingRows.length === 0) {
           setImportResult({ added: 0, skipped, addedRows: [] });
@@ -1695,6 +1755,16 @@
       const resolvedRecords = pendingImport.pendingRows.map((row) => {
         const extraIds = row.ambiguous.flatMap((a) => selections[`${row.rowNo}::${a.name}`] || []);
         const productIds = Array.from(/* @__PURE__ */ new Set([...row.certainIds, ...extraIds]));
+        const completions = {};
+        (row.completionList || []).forEach((cl) => {
+          const pid = productIds.find((id) => {
+            var _a;
+            return normHeader((_a = products.find((p) => p.id === id)) == null ? void 0 : _a.name) === normHeader(cl.name);
+          });
+          if (pid) completions[pid] = { date: cl.date.value, revNo: cl.revNo || "" };
+        });
+        const regUser = row.regId ? users.find((u) => u.empId === row.regId) : null;
+        const registrant = regUser ? { empId: regUser.empId, name: regUser.name, team: regUser.team } : row.regId && row.regName ? { empId: row.regId, name: row.regName, team: "" } : { empId: me.empId, name: me.name, team: me.team };
         return {
           id: uid(),
           docNumber: row.docNumber,
@@ -1704,10 +1774,10 @@
           productIds,
           attachment: null,
           dueDate: row.dueDate,
-          createdAt: dotFormat(isoToday()),
-          completions: {},
+          createdAt: /^\d{4}\.\d{2}\.\d{2}$/.test(row.createdRaw || "") ? row.createdRaw : dotFormat(isoToday()),
+          completions,
           memos: [],
-          registrant: { empId: me.empId, name: me.name, team: me.team }
+          registrant
         };
       });
       const records = resolvedRecords;
@@ -2091,7 +2161,7 @@
           editMode: sidebarEditMode
         }
       );
-    }), sidebarEditMode && /* @__PURE__ */ React.createElement(AddCategoryControl, { onAdd: addCategory }), sidebarEditMode && /* @__PURE__ */ React.createElement(ExcelImportControl, { onImport: importProductsFromExcel, categories })))), /* @__PURE__ */ React.createElement(
+    }), sidebarEditMode && /* @__PURE__ */ React.createElement(AddCategoryControl, { onAdd: addCategory }), sidebarEditMode && /* @__PURE__ */ React.createElement(ExcelImportControl, { onImport: importProductsFromExcel, categories, subcategories, products })))), /* @__PURE__ */ React.createElement(
       "button",
       {
         style: styles.gearBtn,
@@ -2132,7 +2202,10 @@
         onAddUserDirect: addUserDirect,
         onViewUser: (empId) => setSelection({ type: "viewUser", targetEmpId: empId })
       }
-    ) : selection.type === "archive" ? /* @__PURE__ */ React.createElement(ArchivePanel, { archived, isAdmin: me.isAdmin, onRestore: restoreArchivedChange, onDownloadFile: downloadMemoFile }) : selection.type === "notices" ? /* @__PURE__ */ React.createElement(NoticesPanel, { notices, isAdmin: me.isAdmin, onAdd: addNotice, onUpdate: updateNotice, onDelete: deleteNotice, onUploadFile: uploadMemoFile, onDownloadFile: downloadMemoFile }) : selection.type === "alarms" ? /* @__PURE__ */ React.createElement(AlarmsPanel, { alarms: myAlarms, onNavigate: openAlarm, onMarkRead: markAlarmRead, onDelete: deleteAlarm, onClearRead: clearReadAlarms }) : selection.type === "trash" ? /* @__PURE__ */ React.createElement(TrashPanel, { trash: myTrash, products, categories, onRestore: restoreTrashItem, onPermanentDelete: permanentlyDeleteTrashItem }) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: styles.mainHeaderRow }, /* @__PURE__ */ React.createElement("h2", { style: styles.mainTitle }, mainTitle), /* @__PURE__ */ React.createElement("span", { style: styles.mainCount }, visibleChanges.length, "\uAC74"), /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }), selection.type === "mytask" && /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 6, marginRight: 8 } }, /* @__PURE__ */ React.createElement("input", { ref: changeImportRef, type: "file", accept: ".xlsx,.xls", style: { display: "none" }, onChange: handleChangeImportPick }), /* @__PURE__ */ React.createElement("button", { style: styles.smallGhostBtn, onClick: downloadChangeTemplate }, "\uBCC0\uACBD \uC77C\uAD04 \uB4F1\uB85D \uC591\uC2DD \uB2E4\uC6B4\uB85C\uB4DC"), /* @__PURE__ */ React.createElement("button", { style: styles.smallGhostBtn, disabled: importingChanges, onClick: () => {
+    ) : selection.type === "archive" ? /* @__PURE__ */ React.createElement(ArchivePanel, { archived, isAdmin: me.isAdmin, onRestore: restoreArchivedChange, onDownloadFile: downloadMemoFile }) : selection.type === "notices" ? /* @__PURE__ */ React.createElement(NoticesPanel, { notices, isAdmin: me.isAdmin, onAdd: addNotice, onUpdate: updateNotice, onDelete: deleteNotice, onUploadFile: uploadMemoFile, onDownloadFile: downloadMemoFile }) : selection.type === "alarms" ? /* @__PURE__ */ React.createElement(AlarmsPanel, { alarms: myAlarms, onNavigate: openAlarm, onMarkRead: markAlarmRead, onDelete: deleteAlarm, onClearRead: clearReadAlarms }) : selection.type === "trash" ? /* @__PURE__ */ React.createElement(TrashPanel, { trash: myTrash, products, categories, onRestore: restoreTrashItem, onPermanentDelete: permanentlyDeleteTrashItem }) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("div", { style: styles.mainHeaderRow }, /* @__PURE__ */ React.createElement("h2", { style: styles.mainTitle }, mainTitle), /* @__PURE__ */ React.createElement("span", { style: styles.mainCount }, visibleChanges.length, "\uAC74"), /* @__PURE__ */ React.createElement("div", { style: { flex: 1 } }), (selection.type === "all" || selection.type === "mytask" || selection.type === "viewUser" && selection.targetEmpId) && /* @__PURE__ */ React.createElement("button", { style: { ...styles.smallGhostBtn, marginRight: 8 }, onClick: () => {
+      var _a;
+      return exportChangesToExcel(scopedChanges, selection.type === "all" ? "\uC804\uCCB4" : selection.type === "mytask" ? me.name : ((_a = users.find((u) => u.empId === selection.targetEmpId)) == null ? void 0 : _a.name) || "\uAC1C\uC778");
+    } }, "\u{1F4E4} \uBCC0\uACBD \uC804\uCCB4 \uC5D1\uC140 \uB2E4\uC6B4\uB85C\uB4DC"), selection.type === "mytask" && /* @__PURE__ */ React.createElement("div", { style: { display: "flex", gap: 6, marginRight: 8 } }, /* @__PURE__ */ React.createElement("input", { ref: changeImportRef, type: "file", accept: ".xlsx,.xls", style: { display: "none" }, onChange: handleChangeImportPick }), /* @__PURE__ */ React.createElement("button", { style: styles.smallGhostBtn, onClick: downloadChangeTemplate }, "\uBCC0\uACBD \uC77C\uAD04 \uB4F1\uB85D \uC591\uC2DD \uB2E4\uC6B4\uB85C\uB4DC"), /* @__PURE__ */ React.createElement("button", { style: styles.smallGhostBtn, disabled: importingChanges, onClick: () => {
       var _a;
       return (_a = changeImportRef.current) == null ? void 0 : _a.click();
     } }, importingChanges ? "\uB4F1\uB85D \uC911\u2026" : "\u{1F4E5} \uC5D1\uC140\uB85C \uBCC0\uACBD \uC77C\uAD04 \uB4F1\uB85D")), selection.type === "viewUser" && /* @__PURE__ */ React.createElement(
@@ -2444,7 +2517,44 @@
       }
     } }, "\uB4F1\uB85D"), /* @__PURE__ */ React.createElement("button", { style: styles.smallGhostBtn, onClick: () => setAdding(false) }, "\uCDE8\uC18C")));
   }
-  function ExcelImportControl({ onImport, categories = [] }) {
+  function ExcelImportControl({ onImport, categories = [], subcategories = [], products = [] }) {
+    const exportAll = () => {
+      try {
+        const aoa = [["\uC81C\uD615", "\uBB38\uC11C\uD568", "\uC81C\uD488\uBA85", "CTD"]];
+        categories.forEach((c) => {
+          const direct = products.filter((p) => p.categoryId === c.id && !p.subcategoryId).slice().sort(byNameAsc);
+          const subs = subcategories.filter((s) => s.categoryId === c.id);
+          if (direct.length === 0 && subs.length === 0) aoa.push([c.name, "", "", ""]);
+          direct.forEach((p) => aoa.push([c.name, "", p.name, p.ctd ? "O" : ""]));
+          subs.forEach((sb) => {
+            const ps = products.filter((p) => p.subcategoryId === sb.id).slice().sort(byNameAsc);
+            if (ps.length === 0) aoa.push([c.name, sb.name, "", ""]);
+            ps.forEach((p) => aoa.push([c.name, sb.name, p.name, p.ctd ? "O" : ""]));
+          });
+        });
+        if (aoa.length === 1) {
+          alert("\uB0B4\uB824\uBC1B\uC744 \uC81C\uD615/\uC81C\uD488\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.");
+          return;
+        }
+        const ws = XLSX.utils.aoa_to_sheet(aoa);
+        ws["!cols"] = [{ wch: 16 }, { wch: 18 }, { wch: 34 }, { wch: 8 }];
+        const guide = XLSX.utils.aoa_to_sheet([
+          ["\uC548\uB0B4"],
+          ["\xB7 \uC774 \uD30C\uC77C\uC740 '\uC5D1\uC140\uB85C \uC81C\uD488 \uC77C\uAD04 \uCD94\uAC00'\uC5D0 \uADF8\uB300\uB85C \uB123\uC73C\uBA74 \uC81C\uD615 / \uBB38\uC11C\uD568 / \uC81C\uD488\uC774 \uB2E4\uC2DC \uB4F1\uB85D\uB429\uB2C8\uB2E4. (\uC81C\uBAA9\uD589\uC740 \uC218\uC815\uD558\uC9C0 \uB9C8\uC138\uC694)"],
+          ["\xB7 CTD \uC5F4\uC5D0 O \uD45C\uC2DC\uAC00 \uC788\uC73C\uBA74 CTD \uC81C\uD488\uC73C\uB85C \uB4F1\uB85D\uB429\uB2C8\uB2E4."],
+          ["\xB7 \uC81C\uD488\uBA85\uC774 \uBE44\uC5B4 \uC788\uB294 \uD589\uC740 \uBE48 \uC81C\uD615 \uB610\uB294 \uBE48 \uBB38\uC11C\uD568\uC785\uB2C8\uB2E4."],
+          ["\xB7 \uC774\uBBF8 \uC788\uB294 \uC81C\uD488\uC740 \uAC74\uB108\uB701\uB2C8\uB2E4."],
+          [`\xB7 ${categories.length}\uAC1C \uC81C\uD615 / ${subcategories.length}\uAC1C \uBB38\uC11C\uD568 / ${products.length}\uAC1C \uC81C\uD488 (${(/* @__PURE__ */ new Date()).toLocaleString("ko-KR")})`]
+        ]);
+        guide["!cols"] = [{ wch: 95 }];
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "\uC81C\uD488\uBAA9\uB85D");
+        XLSX.utils.book_append_sheet(wb, guide, "\uC548\uB0B4");
+        XLSX.writeFile(wb, `\uC81C\uD615_\uC81C\uD488_\uC804\uCCB4_${isoToday()}.xlsx`);
+      } catch (e) {
+        alert("\uD30C\uC77C \uC0DD\uC131 \uC911 \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4.");
+      }
+    };
     const fileRef = useRef(null);
     const [busy, setBusy] = useState(false);
     const downloadTemplate = () => {
@@ -2497,6 +2607,13 @@
         onClick: downloadTemplate
       },
       "\uC81C\uD488 \uC77C\uAD04 \uCD94\uAC00 \uC591\uC2DD \uB2E4\uC6B4\uB85C\uB4DC"
+    ), /* @__PURE__ */ React.createElement(
+      "button",
+      {
+        style: { ...styles.smallGhostBtn, marginTop: 6, width: "100%", boxSizing: "border-box", textAlign: "center" },
+        onClick: exportAll
+      },
+      "\u{1F4E4} \uC81C\uD615\xB7\uC81C\uD488 \uC804\uCCB4 \uC5D1\uC140 \uB2E4\uC6B4\uB85C\uB4DC"
     ));
   }
   function AuthGate({ onLogin, onSignup, hasNoUsers, teams }) {
